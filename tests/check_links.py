@@ -58,7 +58,7 @@ def collect(browser, base, paths, found, site):
 
 def tools_pages(root):
     y = datetime.date.today().year
-    pages = ["/", "/tax-code/", "/categories/", "/stacks/"]
+    pages = ["/", "/tax-code/", "/categories/", "/stacks/", "/stacks_r/", "/stacks_g/"]
     pages += [f"/tax-calendar/?view=list&year={yy}" for yy in (y, y + 1)]  # even and odd years show different rows
     return [p for p in pages if (root / p.split("?")[0].lstrip("/") / "index.html").exists() or p == "/"]
 

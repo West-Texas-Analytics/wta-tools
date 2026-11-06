@@ -201,7 +201,9 @@
 
 <main>
   <!-- Step 1: pick the file -->
+  <p class="status" id="slotLoading" hidden style="padding:40px 0;text-align:center;font-size:15px">Opening the county's parcels…</p>
   <section id="pick" class="narrow">
+    <div class="lastfile" id="slotNote" style="margin:0 0 16px" hidden><div class="what"><b>This page opens straight into one county.</b> Open that county's parcel file once. This browser keeps it, so the next time this page opens it goes straight to the 3D view.</div></div>
     <p class="intro">Open a district's parcel file. Every parcel is drawn as flat ground, and wherever two or more rows have the same shape, each row becomes a slab stacked on that footprint, so duplicates, catch-all shapes and undrawn splits stand out.</p>
     <div class="drop" id="drop">
       <div class="big">Drop the parcel file here</div>
@@ -248,7 +250,7 @@
       <div class="go">
         <button class="pbtn" id="build" type="button">Build 3D view</button>
         <button class="pbtn ghost" id="again" type="button">Choose a different file</button>
-        <label class="check"><input type="checkbox" id="remember"> Remember this file in this browser</label>
+        <label class="check"><input type="checkbox" id="remember"> <span id="rememberT">Remember this file in this browser</span></label>
       </div>
       <p class="status" id="status" aria-live="polite"></p>
       <p class="err" id="err2" role="alert"></p>
@@ -381,6 +383,43 @@ async function showLast() {
   return rec;
 }
 
+// ---------- county pages (/stacks_r/, /stacks_g/ send ?c=r or ?c=g) ----------
+// A county page keeps its own file and column picks in this browser and opens straight into the 3D view.
+const SLOT = (new URLSearchParams(location.search).get('c') || '').replace(/[^a-z0-9]/gi, '').slice(0, 12) || null;
+const slotKey = SLOT && 'slot:' + SLOT;
+const loadSlot = () => slotKey ? idbDo('readonly', s => s.get(slotKey)).catch(() => null) : Promise.resolve(null);
+const saveSlot = rec => idbDo('readwrite', s => s.put(rec, slotKey)).catch(() => {});
+function settingsNow() {
+  return { layer: +$('sLayer').value || 0, crs: $('sCrs').value, detect: $('sZone').value, title: $('sTitle').value,
+    roles: Object.fromEntries(Object.keys(S.LABELS).map(r => [r, $('r_' + r).value])),
+    extra: [...document.querySelectorAll('#extras input:checked')].map(i => i.value) };
+}
+function applySettings(st) {
+  if (!st) return;
+  if (st.layer && st.layer < picked.opened.layers.length) { $('sLayer').value = st.layer; pickLayer(st.layer); }
+  const setSel = (id, v) => { const el = $(id); if ([...el.options].some(o => o.value === v)) el.value = v; };
+  setSel('sCrs', st.crs); setSel('sZone', st.detect); if (st.title) $('sTitle').value = st.title;
+  Object.entries(st.roles || {}).forEach(([r, c]) => { const el = $('r_' + r); if (el) { setSel('r_' + r, c); el.dispatchEvent(new Event('change')); } });
+  document.querySelectorAll('#extras input').forEach(i => { i.checked = (st.extra || []).includes(i.value); });
+}
+async function startSlot() {
+  if (!SLOT) return false;
+  $('slotNote').hidden = false; $('last').hidden = true;
+  $('rememberT').textContent = 'Make this the file this page opens into';
+  let pick = false; try { pick = sessionStorage.getItem('wta-stacks-pick') === SLOT; sessionStorage.removeItem('wta-stacks-pick'); } catch (e) {}
+  if (pick) return true;   // came from "Open another file"
+  const rec = await loadSlot();
+  if (!rec) return true;
+  $('pick').hidden = true; $('slotLoading').hidden = false;
+  try {
+    picked = { label: rec.label, files: rec.files, opened: await S.openFiles(rec.files) };
+    setup(); applySettings(rec.settings); $('remember').checked = true;
+    await buildNow({ fromSlot: true });
+  } catch (e) { show('pick'); fail('err', e); }
+  finally { $('slotLoading').hidden = true; }
+  return true;
+}
+
 // ---------- step 1 ----------
 async function takeFiles(list) {
   $('err').textContent = '';
@@ -425,6 +464,7 @@ function setup() {
   $('sTitle').value = `${picked.label.replace(/\.(zip|gpkg|geojson|json|shp)$/i, '').replace(/[_-]?shp$/i, '').replace(/[_-]+/g, ' ').trim()} parcel stacks`;
   $('status').textContent = ''; $('err2').textContent = '';
   pickLayer(0);
+  if (SLOT) loadSlot().then(rec => { if (!rec) $('remember').checked = true; });
   show('setup');
 }
 function pickLayer(i) {
@@ -454,8 +494,9 @@ function extrasList() {
   $('extras').innerHTML = L.columns.filter(c => !used.has(c)).map(c => `<label class="check"><input type="checkbox" value="${esc(c)}"${was.has(c) ? ' checked' : ''}> ${esc(c)}</label>`).join('') || '<span class="status">Every column is already in use.</span>';
 }
 $('sLayer').onchange = e => pickLayer(+e.target.value);
-$('again').onclick = () => { picked = null; show('pick'); showLast(); };
-$('build').onclick = async () => {
+$('again').onclick = () => { picked = null; show('pick'); if (!SLOT) showLast(); };
+$('build').onclick = () => buildNow();
+async function buildNow({ fromSlot = false } = {}) {
   const L = picked && picked.layer; if (!L) return;
   $('err2').textContent = '';
   const roles = {}; Object.keys(S.LABELS).forEach(r => { const c = $('r_' + r).value; if (c) roles[r] = c; });
@@ -468,7 +509,10 @@ $('build').onclick = async () => {
   try {
     result = await S.build(L, { title: $('sTitle').value.trim() || undefined, source: `${picked.label} · layer ${L.name}`, roles, extra, detect: $('sZone').value, crs,
       onProgress: t => { $('status').textContent = t; } });
-    if ($('remember').checked) await saveLast({ label: picked.label, files: picked.files, saved: Date.now() });
+    if (SLOT ? $('remember').checked && !fromSlot : $('remember').checked) {
+      const rec = { label: picked.label, files: picked.files, saved: Date.now() };
+      if (SLOT) await saveSlot({ ...rec, settings: settingsNow() }); else await saveLast(rec);
+    }
     $('status').textContent = '';
     show('viewerSec');
     document.title = `${result.view.title} · Parcel Stacks`;
@@ -477,7 +521,7 @@ $('build').onclick = async () => {
     loadContext(result.view, ctl);
   } catch (e) { show('setup'); fail('err2', e); $('status').textContent = ''; }
   finally { $('build').disabled = false; }
-};
+}
 
 // ---------- step 3 ----------
 // Roads and towns come from OpenStreetMap. Only the map area's corners are sent; the answer is kept in this browser for next time.
@@ -497,9 +541,9 @@ $('csv').onclick = () => {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
 };
-$('another').onclick = () => location.reload();
+$('another').onclick = () => { if (SLOT) try { sessionStorage.setItem('wta-stacks-pick', SLOT); } catch (e) {} location.reload(); };
 
-showLast();
+startSlot().then(isSlot => { if (!isSlot) showLast(); });
 })();
 </script>
 </body>
