@@ -205,7 +205,7 @@
       <button class="pbtn ghost" id="lastForget" type="button">Forget it</button>
     </div>
     <p class="err" id="err" role="alert"></p>
-    <p class="privacy">The file is read by this browser on this computer. Nothing is uploaded or sent anywhere, and this page doesn't keep a copy unless you tick “Remember this file in this browser” before building.</p>
+    <p class="privacy">The file is read by this browser on this computer. Nothing from it is uploaded, and this page doesn't keep a copy unless you tick “Remember this file in this browser” before building. To draw roads and town names, the page asks OpenStreetMap for the map around the county; only the area's corners are sent.</p>
   </section>
 
   <!-- Step 2: what the file holds -->
@@ -271,6 +271,11 @@
         <div>
           <span class="lbl">Slabs · 80 ft each</span>
           <div class="row"><label for="autoT">Thicker on big tracts</label><input type="checkbox" id="autoT" checked></div>
+        </div>
+        <div>
+          <span class="lbl">Map</span>
+          <div class="row"><label for="ctxOn">Roads and town names</label><input type="checkbox" id="ctxOn" checked></div>
+          <div class="note" id="ctxNote">Loading roads and towns…</div>
         </div>
         <div>
           <label class="lbl" for="find">Find account or owner</label>
@@ -456,12 +461,23 @@ $('build').onclick = async () => {
     $('status').textContent = '';
     show('viewerSec');
     document.title = `${result.view.title} · Parcel Stacks`;
-    if (!window.WTAStacksViewer.start(result.view)) throw new Error('The 3D view could not start in this browser.');
+    const ctl = window.WTAStacksViewer.start(result.view);
+    if (!ctl) throw new Error('The 3D view could not start in this browser.');
+    loadContext(result.view, ctl);
   } catch (e) { show('setup'); fail('err2', e); $('status').textContent = ''; }
   finally { $('build').disabled = false; }
 };
 
 // ---------- step 3 ----------
+// Roads and towns come from OpenStreetMap. Only the map area's corners are sent; the answer is kept in this browser for next time.
+async function loadContext(view, ctl) {
+  const key = 'osm:' + view.bbox_ll.join(',');
+  try {
+    let osm = await idbDo('readonly', s => s.get(key)).catch(() => null);
+    if (!osm) { osm = await S.fetchOsm(view.bbox_ll); idbDo('readwrite', s => s.put(osm, key)).catch(() => {}); }
+    ctl.setContext(S.contextFromOsm(osm, view));
+  } catch (e) { ctl.contextStatus('Roads and towns could not load (needs an internet connection). The parcels are unaffected.'); }
+}
 $('csv').onclick = () => {
   const blob = new Blob([S.stacksCsv(result.stackRows)], { type: 'text/csv' });
   const a = document.createElement('a');

@@ -360,5 +360,51 @@ legend(); buildAll(); renderList(); renderInspector();
 document.getElementById('scale').textContent=`Ground: ${fmtInt(D.parcels)} parcels · not clickable · about ${Math.max(1,Math.round(D.extent_ft[0]/5280))} × ${Math.max(1,Math.round(D.extent_ft[1]/5280))} mi`;
 loadingEl.remove();
 requestAnimationFrame(loop);
-return true;
+// ---------- roads and towns (OpenStreetMap), drawn when setContext() is called ----------
+const ctxGroup=new THREE.Group(); scene.add(ctxGroup);
+const ctxOn=document.getElementById('ctxOn'), ctxNote=document.getElementById('ctxNote');
+const ROAD={local:{color:0x9E8C6A,w:2.2,z:0.2},fm:{color:0x5E6670,w:4,z:0.25},major:{color:0x2E3A45,w:6.5,z:0.3}};
+const pxScale=px=>px*2/(800*(1/Math.tan(20*D2R)));   // sprite scale for about px pixels tall on a typical screen
+function textSprite(text,px,{weight=700,fg='#1A2A37',depth=true}={}){
+  const c=document.createElement('canvas'),g=c.getContext('2d'),fs=40,font=`${weight} ${fs}px Roboto, "Segoe UI", sans-serif`;
+  g.font=font; const w=Math.ceil(g.measureText(text).width+fs*0.7), h=Math.ceil(fs*1.45); c.width=w; c.height=h;
+  g.font=font; g.textAlign='center'; g.textBaseline='middle'; g.lineJoin='round'; g.lineWidth=fs*0.24; g.strokeStyle='rgba(255,251,239,.96)';
+  g.strokeText(text,w/2,h/2+1); g.fillStyle=fg; g.fillText(text,w/2,h/2+1);
+  const tex=new THREE.CanvasTexture(c); tex.minFilter=THREE.LinearFilter;
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,sizeAttenuation:false,depthTest:depth,depthWrite:false,transparent:true}));
+  const k=pxScale(px); sp.scale.set(k*w/h,k,1); sp.renderOrder=depth?3:10; return sp;
+}
+function clearContext(){ctxGroup.traverse(o=>{if(o.geometry)o.geometry.dispose(); if(o.material){if(o.material.map)o.material.map.dispose(); o.material.dispose();}}); ctxGroup.clear();}
+function setContext(ctx){
+  clearContext();
+  for(const [cls,st] of Object.entries(ROAD)){
+    const tri=[], seg=[];
+    ctx.roads.filter(r=>r.cls===cls).forEach(r=>{for(let i=1;i<r.pts.length;i++){const a=r.pts[i-1],b=r.pts[i],L=Math.hypot(b[0]-a[0],b[1]-a[1]); if(!L)continue;
+      const nx=-(b[1]-a[1])/L*st.w/2, ny=(b[0]-a[0])/L*st.w/2;
+      tri.push(a[0]+nx,a[1]+ny,st.z, a[0]-nx,a[1]-ny,st.z, b[0]+nx,b[1]+ny,st.z, b[0]+nx,b[1]+ny,st.z, a[0]-nx,a[1]-ny,st.z, b[0]-nx,b[1]-ny,st.z);
+      seg.push(a[0],a[1],st.z,b[0],b[1],st.z);}});
+    if(!seg.length) continue;
+    const tg=new THREE.BufferGeometry(); tg.setAttribute('position',new THREE.Float32BufferAttribute(tri,3));
+    const lg=new THREE.BufferGeometry(); lg.setAttribute('position',new THREE.Float32BufferAttribute(seg,3));
+    ctxGroup.add(new THREE.Mesh(tg,new THREE.MeshBasicMaterial({color:st.color,side:THREE.DoubleSide})), new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:st.color})));
+  }
+  // road names: highways and farm roads, about one label every 4 miles of road
+  let nLab=0; const byName=new Map();
+  ctx.roads.filter(r=>r.label&&r.cls!=='local').forEach(r=>{(byName.get(r.label)||byName.set(r.label,[]).get(r.label)).push(r);});
+  for(const [name,rs] of byName){
+    let carry=1050;
+    for(const r of rs) for(let i=1;i<r.pts.length&&nLab<300;i++){const a=r.pts[i-1],b=r.pts[i],L=Math.hypot(b[0]-a[0],b[1]-a[1]); carry+=L;
+      if(carry>=2100){carry=0; const sp=textSprite(name,17,{fg:'#2E3A45',depth:false}); sp.position.set((a[0]+b[0])/2,(a[1]+b[1])/2,3); ctxGroup.add(sp); nLab++;}}
+  }
+  // towns
+  const rank={city:0,town:1,village:2,hamlet:3};
+  ctx.towns.slice().sort((a,b)=>(rank[a.kind]??4)-(rank[b.kind]??4)).slice(0,60).forEach(t=>{
+    const big=t.kind==='city'||t.kind==='town', sp=textSprite(t.name,big?28:20,{weight:big?700:500,fg:'#24394A',depth:false});
+    sp.position.set(t.x,t.y,big?60:40); ctxGroup.add(sp);});
+  ctxGroup.visible=ctxOn.checked;
+  ctxNote.textContent=`${fmtInt(ctx.roads.length)} roads, ${fmtInt(ctx.towns.length)} places · © OpenStreetMap contributors`;
+}
+try{ if(localStorage.getItem('wta-stacks-ctx')==='off') ctxOn.checked=false; }catch(e){}
+ctxOn.onchange=()=>{ctxGroup.visible=ctxOn.checked; try{localStorage.setItem('wta-stacks-ctx',ctxOn.checked?'on':'off');}catch(e){}};
+return { setContext, contextStatus(t){ ctxNote.textContent=t; } };
 }};
