@@ -40,7 +40,7 @@ The live site updates a minute or two after the commit.
 
 ## Files
 
-- `CNAME`: custom domain for GitHub Pages (`tools.westtexasanalytics.com`). DNS is a CNAME record `tools` → `kerrymcclain.github.io` at GoDaddy.
+- `CNAME`: custom domain for GitHub Pages (`tools.westtexasanalytics.com`). DNS is a CNAME record `tools` → `west-texas-analytics.github.io` at GoDaddy (the repo is in the West-Texas-Analytics org; moving a repo between accounts turns Pages off, so recheck Settings → Pages and this record after any move).
 - `.nojekyll`: serve the files as-is.
 - `favicon-32.png`, `apple-touch-icon.png`: Twin Buttes site icon.
 
