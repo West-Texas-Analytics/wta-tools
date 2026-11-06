@@ -87,11 +87,13 @@
   .status { color: var(--muted); font-size: 13px; }
 
   /* Step 3: the viewer (from wta-stacks) */
-  .vtop { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 24px; margin-bottom: 14px; }
+  .vtop { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 24px; margin-bottom: 10px; }
   .vtop h2 { font-size: 22px; margin: 0; }
   .vtop .sub { color: var(--ink-2); font-size: 13px; }
   .vtop .acts { display: flex; gap: 8px; flex-wrap: wrap; }
-  .app { display: grid; grid-template-columns: 270px minmax(0, 1fr) 340px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); height: 680px; }
+  /* Viewing: use the whole window width, and fill the window height below the title row. */
+  body.viewing main { max-width: none; padding-top: 14px; }
+  .app { display: grid; grid-template-columns: 260px minmax(0, 1fr) 340px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); height: max(560px, calc(100vh - 175px)); }
   .panel { padding: 14px; overflow: auto; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
   .panel.left { border-right: 1px solid var(--line); }
   .panel.right { border-left: 1px solid var(--line); }
@@ -156,9 +158,9 @@
 
   @media (max-width: 1100px) {
     .app { grid-template-columns: 240px minmax(0, 1fr); height: auto; }
-    .view { height: 560px; }
+    .view { height: max(480px, calc(100vh - 175px)); }
     .panel.right { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
-    .panel.left { max-height: 560px; }
+    .panel.left { max-height: max(480px, calc(100vh - 175px)); }
   }
   @media (max-width: 720px) {
     .band > nav { margin-left: 0; width: 100%; }
@@ -346,7 +348,7 @@ const ROLE_HELP = { account: 'Account', geo_id: 'Geo ID', owner: 'Owner', legal:
 let picked = null;     // {label, files:[{name, bytes}], opened, layer}
 let result = null;
 
-function show(step) { ['pick', 'setup', 'viewerSec'].forEach(id => { $(id).hidden = id !== step; }); window.scrollTo(0, 0); }
+function show(step) { ['pick', 'setup', 'viewerSec'].forEach(id => { $(id).hidden = id !== step; }); document.body.classList.toggle('viewing', step === 'viewerSec'); window.scrollTo(0, 0); }
 function fail(el, e) { $(el).textContent = e && e.message ? e.message : String(e); }
 
 // ---------- remembered file (IndexedDB, this browser only) ----------
