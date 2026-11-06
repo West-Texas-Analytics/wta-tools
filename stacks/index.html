@@ -93,7 +93,19 @@
   .vtop .acts { display: flex; gap: 8px; flex-wrap: wrap; }
   /* Viewing: use the whole window width, and fill the window height below the title row. */
   body.viewing main { max-width: none; padding-top: 14px; }
-  .app { display: grid; grid-template-columns: 400px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); height: max(560px, calc(100vh - 205px)); }
+  .app { display: grid; grid-template-columns: 400px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); height: max(420px, calc(100vh - 252px - var(--dock-h, 173px))); }
+  /* account details, full width under the view: 5 rows to start, drag the grip to show more */
+  .dock { margin-top: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); overflow: hidden; }
+  .dock-grip { height: 10px; cursor: ns-resize; display: grid; place-items: center; background: var(--ground); border-bottom: 1px solid var(--line); touch-action: none; }
+  .dock-grip span { width: 44px; height: 4px; border-radius: 2px; background: var(--line); }
+  .dock-grip:hover span, .dock-grip:focus-visible span { background: var(--sun); }
+  .dock-grip:focus-visible { outline: none; }
+  .dock-h { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; padding: 6px 12px; font-size: 12.5px; color: var(--ink-2); }
+  .dock-h b { color: var(--ink); }
+  .dock-tbl { height: var(--dock-h, 173px); overflow: auto; border-top: 1px solid var(--line); }
+  .dock-tbl .empty { padding: 14px 12px; font-size: 12.5px; color: var(--ink-2); }
+  .dock-tbl tr.pick td { background: #FFE98A; }
+  .dock-tbl tr.pick td.diff { background: #FFD84A; }
   .panel { padding: 14px; overflow: auto; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
   .panel.left { border-right: 1px solid var(--line); }
   .lbl { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-2); font-weight: 600; margin-bottom: 6px; display: block; }
@@ -317,6 +329,11 @@
         <div class="tip" id="tip" hidden></div>
       </div>
     </div>
+    <section class="dock" id="dock" aria-label="Account details for the selected stack">
+      <div class="dock-grip" id="dockGrip" role="separator" aria-orientation="horizontal" aria-label="Drag to show more or fewer rows" tabindex="0" title="Drag to show more or fewer rows"><span></span></div>
+      <div class="dock-h" id="dockH"></div>
+      <div class="dock-tbl" id="dockTbl"></div>
+    </section>
     <div class="below">
         <div class="hint">
           <kbd>Drag</kbd> orbit · <kbd>Right-drag</kbd> or <kbd>Shift+drag</kbd> pan · <kbd>Scroll</kbd> zoom (on the stack when one is open)<br>

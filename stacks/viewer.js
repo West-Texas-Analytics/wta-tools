@@ -8,7 +8,7 @@ const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const U=10, SLAB_FT=500, MAX_STACK_FT=10000, D2R=Math.PI/180;   // slabs are 500 ft; a stack taller than 10,000 ft is squeezed to fit (thinner slabs)
 const fmtInt=n=>n.toLocaleString('en-US');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const causes=D.causes, fields=D.fields;
+const fields=D.fields;
 
 document.getElementById('hTitle').textContent=D.title;
 document.getElementById('hSub').textContent=`${D.source} · built ${D.built}`;
@@ -27,6 +27,7 @@ view.prepend(renderer.domElement);
 renderer.domElement.tabIndex=0; renderer.domElement.setAttribute('aria-label','3D parcel view');
 const scene=new THREE.Scene();
 const camera=new THREE.PerspectiveCamera(40,1,1,1e6); camera.up.set(0,0,1);
+const roadPx={value:0};   // world units per screen pixel at distance 1, for the roads; kept current in resize()
 scene.add(new THREE.AmbientLight(0xffffff,0.62));
 const sun=new THREE.DirectionalLight(0xffffff,0.55); sun.position.set(-1,-1.6,2.4); scene.add(sun);
 const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -218,7 +219,7 @@ function restyle(){
 
 // ---------- camera control ----------
 const ray=new THREE.Raycaster(), ndc=new THREE.Vector2(), groundPlane=new THREE.Plane(new THREE.Vector3(0,0,1),0);
-const MAXD=Math.max(county.r*4, MAX_STACK_FT/U*3), MIND=8;   // far enough out to frame the tallest stack
+const MAXD=Math.max(county.r*8, MAX_STACK_FT/U*3), MIND=8;   // far enough out to frame the tallest stack
 function setNDC(e){const r=renderer.domElement.getBoundingClientRect();ndc.set(((e.clientX-r.left)/r.width)*2-1,-((e.clientY-r.top)/r.height)*2+1);}
 function groundAt(e){setNDC(e);ray.setFromCamera(ndc,camera);const p=new THREE.Vector3();return ray.ray.intersectPlane(groundPlane,p)?p:null;}
 renderer.domElement.addEventListener('wheel',e=>{
@@ -234,13 +235,14 @@ controls.enableDamping=true; controls.dampingFactor=0.09; controls.screenSpacePa
 controls.maxPolarAngle=84*D2R; controls.minDistance=MIND; controls.maxDistance=MAXD;
 controls.mouseButtons={LEFT:THREE.MOUSE.ROTATE,MIDDLE:THREE.MOUSE.DOLLY,RIGHT:THREE.MOUSE.PAN};
 controls.touches={ONE:THREE.TOUCH.ROTATE,TWO:THREE.TOUCH.DOLLY_PAN};
-controls.addEventListener('start',stopAnim);
+controls.addEventListener('start',()=>{stopAnim();atHome=false;});
+let atHome=true;   // still on the starting view: re-framed when the view changes size
 function sph(){const o=camera.position.clone().sub(controls.target);const d=o.length();return {d,phi:Math.acos(Math.min(1,Math.max(-1,o.z/d))),th:Math.atan2(o.y,o.x)};}
 function placeCam(t,d,phi,th){camera.position.set(t.x+d*Math.sin(phi)*Math.cos(th),t.y+d*Math.sin(phi)*Math.sin(th),t.z+d*Math.cos(phi));controls.target.copy(t);}
 let anim=null; function stopAnim(){anim=null;}
 const ease=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
 function flyTo(t,d,phi,th,ms=1200){
-  const a=sph(), from={t:controls.target.clone(),...a};
+  atHome=false; const a=sph(), from={t:controls.target.clone(),...a};
   if(th===undefined)th=a.th; if(phi===undefined)phi=a.phi; if(d===undefined)d=a.d;
   let dth=th-from.th; while(dth>Math.PI)dth-=2*Math.PI; while(dth<-Math.PI)dth+=2*Math.PI;
   if(reduce){placeCam(t,d,phi,th);return;}
@@ -248,7 +250,18 @@ function flyTo(t,d,phi,th,ms=1200){
   anim=now=>{const k=Math.min(1,(now-t0)/ms),e=ease(k);
     placeCam(from.t.clone().lerp(t,e),(from.d+(d-from.d)*e)*(1+(lift-1)*Math.sin(Math.PI*k)),from.phi+(phi-from.phi)*e,from.th+dth*e); if(k>=1)anim=null;};
 }
-function fit(){flyTo(new THREE.Vector3(county.cx,county.cy,0),county.r*2.4,45*D2R,-Math.PI/2);}
+// The whole county (and the top of every stack) on screen, with a small margin, at the starting angle.
+const HOME_PHI=45*D2R, HOME_TH=-Math.PI/2;
+function homeDist(){
+  const t=new THREE.Vector3(county.cx,county.cy,0), pts=[[minX,minY,0],[maxX,minY,0],[minX,maxY,0],[maxX,maxY,0]].map(p=>new THREE.Vector3(...p));
+  stacks.forEach(s=>{if(s.top!=null)pts.push(new THREE.Vector3(s.cx,s.cy,s.top));});
+  const cam=camera.clone(), q=new THREE.Vector3();
+  const fits=d=>{cam.position.set(t.x+d*Math.sin(HOME_PHI)*Math.cos(HOME_TH),t.y+d*Math.sin(HOME_PHI)*Math.sin(HOME_TH),t.z+d*Math.cos(HOME_PHI));
+    cam.lookAt(t); cam.updateMatrixWorld(); return pts.every(p=>{q.copy(p).project(cam); return q.z<1&&Math.abs(q.x)<=0.92&&Math.abs(q.y)<=0.9;});};
+  let lo=county.r*0.5, hi=county.r*20; if(fits(lo)) return lo;
+  for(let k=0;k<40;k++){const m=(lo+hi)/2; if(fits(m))hi=m; else lo=m;} return hi;
+}
+function fit(){flyTo(new THREE.Vector3(county.cx,county.cy,0),homeDist(),HOME_PHI,HOME_TH);atHome=true;}
 
 // ---------- selection + inspector ----------
 const fmt=(k,v)=>v==null||v===''?'—':typeof v==='number'?v.toLocaleString('en-US',{maximumFractionDigits:3}):String(v);
@@ -267,6 +280,7 @@ function backToRows(){detailRow=null;hoverRow=null;restyle();renderInspector();}
 // ---------- left panel, below the row slider: the stack list, a stack's rows, or every field of one slab ----------
 const insp=document.getElementById('insp');
 function renderInspector(){
+  renderDock();
   if(!selected){
     const vis=stacks.filter(s=>s.visible);
     insp.innerHTML=`<div class="row" style="margin-bottom:6px"><span class="lbl" style="margin:0">Stacks · ${fmtInt(vis.length)} shown</span>
@@ -292,10 +306,8 @@ function renderInspector(){
       ${others.length?`<details class="card-more"><summary>All ${others.length} filled columns in the file</summary><dl class="kv">${others.map(k=>`<dt>${esc(k)}</dt><dd>${esc(fmt(k,rec[k]))}</dd>`).join('')}</dl></details>`:''}
       <div class="card-nav"><button class="btn" id="iDn" ${i===0?'disabled':''}>▼ Slab below</button><button class="btn" id="iUp" ${i===s.n-1?'disabled':''}>▲ Slab above</button></div>`;
   }else{
-    body=`<div><span class="lbl">Rows, bottom slab first · click one for all its data</span><div class="tbl"><table><thead><tr><th>#</th>${differ.map(f=>`<th>${esc(f)}</th>`).join('')}</tr></thead><tbody>
-      ${s.rows.map((r,i)=>`<tr data-i="${i}" class="${hoverRow===i?'hl':''}"><td>${i+1}</td>${differ.map(f=>`<td class="diff">${esc(fmt(f,r[f]))}</td>`).join('')}</tr>`).join('')}
-      </tbody></table></div></div>
-      <div class="same"><b>Same on every row:</b> ${same.map(f=>`${esc(f)} <span style="color:var(--ink)">${esc(fmt(f,s.rows[0][f]))}</span>`).join(' · ')||'none'}</div>
+    body=`<div class="same"><b>Same on every row:</b> ${same.map(f=>`${esc(f)} <span style="color:var(--ink)">${esc(fmt(f,s.rows[0][f]))}</span>`).join(' · ')||'none'}</div>
+      <div class="note" style="margin:0">Every row is in the table below the view. Click one for all its data.</div>
       <div class="btns"><button class="btn" id="iZoom">Zoom to stack</button><button class="btn" id="iClear">Back to county</button></div>`;
   }
   insp.innerHTML=head+body;
@@ -306,13 +318,45 @@ function renderInspector(){
     insp.querySelector('#iDn').onclick=()=>flyToRow(s,detailRow-1);
     insp.querySelector('#iUp').onclick=()=>flyToRow(s,detailRow+1);
   }else{
-    insp.querySelectorAll('tbody tr').forEach(tr=>{const i=+tr.dataset.i;
-      tr.addEventListener('mouseenter',()=>{hoverRow=i;restyle();}); tr.addEventListener('mouseleave',()=>{hoverRow=null;restyle();});
-      tr.addEventListener('click',()=>flyToRow(s,i));});
     insp.querySelector('#iZoom').onclick=()=>focusStack(s);
     insp.querySelector('#iClear').onclick=()=>{clearSel();fit();};
   }
 }
+// ---------- account details: full width under the view, every row of the selected stack ----------
+const dockH=document.getElementById('dockH'), dockTbl=document.getElementById('dockTbl');
+function renderDock(){
+  if(!selected){
+    dockH.innerHTML='<span><b>Account details</b></span>';
+    dockTbl.innerHTML='<div class="empty">Click a stack in the list or in the view to see every row on its footprint here.</div>';
+    return;
+  }
+  const s=selected, differ=new Set(fields.filter(f=>new Set(s.rows.map(r=>String(r[f]??''))).size>1));
+  dockH.innerHTML=`<span><b>${s.n} rows on one footprint</b></span><span>bottom slab first · highlighted columns differ between rows · click a row for all its data</span>`;
+  dockTbl.innerHTML=`<table><thead><tr><th>Slab</th>${fields.map(f=>`<th>${esc(f)}</th>`).join('')}</tr></thead><tbody>
+    ${s.rows.map((r,i)=>`<tr data-i="${i}" class="${detailRow===i?'pick':''}${hoverRow===i?' hl':''}"><td>${i+1}</td>${fields.map(f=>`<td class="${differ.has(f)?'diff':''}">${esc(fmt(f,r[f]))}</td>`).join('')}</tr>`).join('')}
+    </tbody></table>`;
+  dockTbl.querySelectorAll('tbody tr').forEach(tr=>{const i=+tr.dataset.i;
+    tr.addEventListener('mouseenter',()=>{hoverRow=i;restyle();}); tr.addEventListener('mouseleave',()=>{hoverRow=null;restyle();});
+    tr.addEventListener('click',()=>flyToRow(s,i));});
+  const pk=dockTbl.querySelector('tr.pick'); if(pk) pk.scrollIntoView({block:'nearest'});
+}
+// The grip on top of the table: drag (or arrow keys) to show more or fewer rows. Starts at 5 rows.
+(()=>{
+  const grip=document.getElementById('dockGrip'), root=document.documentElement;
+  const rowH=()=>{const r=dockTbl.querySelector('tbody tr'); return r?r.getBoundingClientRect().height:27;};
+  const fiveRows=()=>{const h=dockTbl.querySelector('thead'); return Math.round((h?h.getBoundingClientRect().height:28)+5*rowH()+2);};
+  const setH=px=>{px=Math.max(60,Math.min(Math.round(px),Math.max(120,innerHeight-260))); root.style.setProperty('--dock-h',px+'px'); try{localStorage.setItem('wta-stacks-dock-h',px);}catch(e){}};
+  let saved=null; try{saved=+localStorage.getItem('wta-stacks-dock-h')||null;}catch(e){}
+  if(saved) root.style.setProperty('--dock-h',saved+'px');
+  let drag=null;
+  grip.addEventListener('pointerdown',e=>{drag={y:e.clientY,h:dockTbl.getBoundingClientRect().height}; grip.setPointerCapture(e.pointerId); e.preventDefault();});
+  grip.addEventListener('pointermove',e=>{if(drag) setH(drag.h+(drag.y-e.clientY));});
+  const end=()=>{drag=null;}; grip.addEventListener('pointerup',end); grip.addEventListener('pointercancel',end);
+  grip.addEventListener('dblclick',()=>setH(fiveRows()));
+  grip.addEventListener('keydown',e=>{const h=dockTbl.getBoundingClientRect().height;
+    if(e.key==='ArrowUp'){setH(h+rowH());e.preventDefault();} else if(e.key==='ArrowDown'){setH(h-rowH());e.preventDefault();} else if(e.key==='Home'){setH(fiveRows());e.preventDefault();}});
+  window.__wtaDockFive=fiveRows;
+})();
 // ---------- filters (the bar above the view) ----------
 const fOwn=document.getElementById('fOwn'), fUse=document.getElementById('fUse'), fFind=document.getElementById('find');
 const useOf=r=>String(r['Land use']??'').trim().toUpperCase();
@@ -421,7 +465,8 @@ lim.push('Owner names come from the file. The file was read by this browser only
 document.getElementById('limits').innerHTML=lim.map(t=>`<li>${esc(t)}</li>`).join('');
 
 // ---------- loop ----------
-function resize(){const r=view.getBoundingClientRect();renderer.setSize(r.width,r.height,false);camera.aspect=r.width/Math.max(1,r.height);camera.updateProjectionMatrix();}
+function resize(){const r=view.getBoundingClientRect();renderer.setSize(r.width,r.height,false);camera.aspect=r.width/Math.max(1,r.height);camera.updateProjectionMatrix();roadPx.value=2*Math.tan(camera.fov/2*D2R)/Math.max(1,r.height);
+  if(atHome&&typeof homeDist==='function'&&stacks.every(s=>s.top!=null)){stopAnim();placeCam(new THREE.Vector3(county.cx,county.cy,0),homeDist(),HOME_PHI,HOME_TH);}}
 new ResizeObserver(resize).observe(view); resize();
 const needle=document.getElementById('needle');
 function loop(now){
@@ -430,16 +475,26 @@ function loop(now){
   const v=controls.target.clone().sub(camera.position); needle.setAttribute('transform',`rotate(${-Math.atan2(v.x,v.y)*180/Math.PI} 27 27)`);
   renderer.render(scene,camera); requestAnimationFrame(loop);
 }
-placeCam(new THREE.Vector3(county.cx,county.cy,0),county.r*2.4,45*D2R,-Math.PI/2);
 legend(); buildAll(); renderList(); renderInspector();
+placeCam(new THREE.Vector3(county.cx,county.cy,0),homeDist(),HOME_PHI,HOME_TH);
 document.getElementById('scale').textContent=`Ground: ${fmtInt(D.parcels)} parcels · not clickable · about ${Math.max(1,Math.round(D.extent_ft[0]/5280))} × ${Math.max(1,Math.round(D.extent_ft[1]/5280))} mi`;
 loadingEl.remove();
 requestAnimationFrame(loop);
 // ---------- roads and towns (OpenStreetMap), drawn when setContext() is called ----------
 const ctxGroup=new THREE.Group(); scene.add(ctxGroup);
 const ctxOn=document.getElementById('ctxOn'), ctxNote=document.getElementById('ctxNote');
-// Roads: a light center on a dark casing, so they read on both the dark surround and the sand parcels.
-const ROAD={local:{color:0xBDB5A6,w:1.6,z:0.2},fm:{color:0xE6DCC3,w:3,z:0.25},major:{color:0xF2C45A,w:5,z:0.3}}, CASING=0x1C1F22, ROAD_ON_PARCELS=0x000000;
+// Roads keep a width in screen pixels (never thinner than the real road), so they stay easy to see at county zoom.
+// Off the parcel fabric: a light center on a dark casing. On it: solid black, with a thin light edge.
+const ROAD={local:{color:0xBDB5A6,px:2.5,ft:24,z:0.2},fm:{color:0xE6DCC3,px:4,ft:32,z:0.25},major:{color:0xF2C45A,px:5.5,ft:44,z:0.3}}, CASING=0x1C1F22, ROAD_ON_PARCELS=0x000000, ROAD_EDGE=0xF4EEE2;
+function roadMaterial(color,px,ft,extra){
+  const m=new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide,...extra});
+  m.onBeforeCompile=sh=>{sh.uniforms.uPxK=roadPx; sh.uniforms.uCam={value:camera.position}; sh.vertexShader=sh.vertexShader
+    .replace('#include <common>','#include <common>\nattribute vec2 nrm; uniform float uPxK; uniform vec3 uCam;')
+    .replace('#include <begin_vertex>',`#include <begin_vertex>
+      float pxw=distance(uCam,position)*uPxK;   // MeshBasicMaterial doesn't get cameraPosition
+      transformed.xy+=nrm*max(${(px/2).toFixed(2)}*pxw,${(ft/U/2).toFixed(2)});`);};
+  m.customProgramCacheKey=()=>'road'+px+'_'+ft; return m;
+}
 const pxScale=px=>px*2/(800*(1/Math.tan(20*D2R)));   // sprite scale for about px pixels tall on a typical screen
 function textSprite(text,px,{weight=700,fg='#F7F3EA',halo='rgba(22,25,28,.88)',depth=true,alpha=1}={}){
   const c=document.createElement('canvas'),g=c.getContext('2d'),fs=40,font=`${weight} ${fs}px Roboto, "Segoe UI", sans-serif`;
@@ -454,22 +509,25 @@ function clearContext(){ctxGroup.traverse(o=>{if(o.geometry)o.geometry.dispose()
 function setContext(ctx){
   clearContext();
   for(const [cls,st] of Object.entries(ROAD)){
-    const tri=[], cas=[], seg=[];
-    const ribbon=(out,a,b,L,w,z)=>{const nx=-(b[1]-a[1])/L*w/2, ny=(b[0]-a[0])/L*w/2;
-      out.push(a[0]+nx,a[1]+ny,z, a[0]-nx,a[1]-ny,z, b[0]+nx,b[1]+ny,z, b[0]+nx,b[1]+ny,z, a[0]-nx,a[1]-ny,z, b[0]-nx,b[1]-ny,z);};
-    ctx.roads.filter(r=>r.cls===cls).forEach(r=>{for(let i=1;i<r.pts.length;i++){const a=r.pts[i-1],b=r.pts[i],L=Math.hypot(b[0]-a[0],b[1]-a[1]); if(!L)continue;
-      ribbon(cas,a,b,L,st.w+3,st.z-0.05); ribbon(tri,a,b,L,st.w,st.z); seg.push(a[0],a[1],st.z+0.01,b[0],b[1],st.z+0.01);}});
-    if(!seg.length) continue;
-    const geo=arr=>{const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(arr,3)); return g;};
-    // off the parcels: light center on a dark casing; on the parcels: solid black
+    const pos=[], nrm=[];
+    // each segment is a quad of four copies of its ends, pushed sideways in the shader; a square at each
+    // vertex fills the gap at bends
+    const quad=(a,b,z)=>{const L=Math.hypot(b[0]-a[0],b[1]-a[1]); if(!L)return; const nx=-(b[1]-a[1])/L, ny=(b[0]-a[0])/L;
+      pos.push(a[0],a[1],z, a[0],a[1],z, b[0],b[1],z, b[0],b[1],z, a[0],a[1],z, b[0],b[1],z);
+      nrm.push(nx,ny, -nx,-ny, nx,ny, nx,ny, -nx,-ny, -nx,-ny);};
+    const dot=(a,z)=>{const c=[[1,1],[-1,1],[-1,-1],[1,-1]].map(([x,y])=>[x*0.7071,y*0.7071]);
+      [[0,1,2],[0,2,3]].forEach(t=>t.forEach(k=>{pos.push(a[0],a[1],z); nrm.push(...c[k]);}));};
+    ctx.roads.filter(r=>r.cls===cls).forEach(r=>{for(let i=1;i<r.pts.length;i++) quad(r.pts[i-1],r.pts[i],st.z); r.pts.slice(1,-1).forEach(p=>dot(p,st.z));});
+    if(!pos.length) continue;
+    const geo=()=>{const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+      g.setAttribute('nrm',new THREE.Float32BufferAttribute(nrm,2)); g.computeBoundingSphere(); g.boundingSphere.radius+=county.r; return g;};
     const off={stencilWrite:true,stencilRef:1,stencilFunc:THREE.NotEqualStencilFunc}, on={stencilWrite:true,stencilRef:1,stencilFunc:THREE.EqualStencilFunc};
     const keep={stencilFail:THREE.KeepStencilOp,stencilZFail:THREE.KeepStencilOp,stencilZPass:THREE.KeepStencilOp};
-    const add=o=>{o.renderOrder=1; ctxGroup.add(o);};
-    add(new THREE.Mesh(geo(cas),new THREE.MeshBasicMaterial({color:CASING,side:THREE.DoubleSide,transparent:true,opacity:0.7,...off,...keep})));
-    add(new THREE.Mesh(geo(tri),new THREE.MeshBasicMaterial({color:st.color,side:THREE.DoubleSide,...off,...keep})));
-    add(new THREE.LineSegments(geo(seg),new THREE.LineBasicMaterial({color:st.color,...off,...keep})));
-    add(new THREE.Mesh(geo(tri),new THREE.MeshBasicMaterial({color:ROAD_ON_PARCELS,side:THREE.DoubleSide,...on,...keep})));
-    add(new THREE.LineSegments(geo(seg),new THREE.LineBasicMaterial({color:ROAD_ON_PARCELS,...on,...keep})));
+    const add=(o,order)=>{o.renderOrder=order; ctxGroup.add(o);};
+    add(new THREE.Mesh(geo(),roadMaterial(CASING,st.px+3,st.ft+12,{...off,...keep})),1);
+    add(new THREE.Mesh(geo(),roadMaterial(st.color,st.px,st.ft,{...off,...keep})),2);
+    add(new THREE.Mesh(geo(),roadMaterial(ROAD_EDGE,st.px+2,st.ft+8,{...on,...keep})),1);
+    add(new THREE.Mesh(geo(),roadMaterial(ROAD_ON_PARCELS,st.px,st.ft,{...on,...keep})),2);
   }
   // road names: highways and farm roads only, about one label every 12 miles of road, and never two labels
   // within about 3 miles of each other or of a town name
@@ -495,6 +553,6 @@ function setContext(ctx){
 try{ if(localStorage.getItem('wta-stacks-ctx')==='off') ctxOn.checked=false; }catch(e){}
 ctxOn.onchange=()=>{ctxGroup.visible=ctxOn.checked; try{localStorage.setItem('wta-stacks-ctx',ctxOn.checked?'on':'off');}catch(e){}};
 // for the page tests: how far the orbit point is from the selected stack's center line (scene units)
-window.__wtaStacks={stackOnScreen:()=>{if(!selected)return null;const s=selected,y=z=>new THREE.Vector3(s.cx,s.cy,z).project(camera).y;return [y(0),y(s.top)];},pickedSlab:()=>paintedPick?detailRow:null,orbitOffset:()=>selected?Math.hypot(controls.target.x-selected.cx,controls.target.y-selected.cy):null};
+window.__wtaStacks={countyOnScreen:()=>Math.max(...[[minX,minY,0],[maxX,minY,0],[minX,maxY,0],[maxX,maxY,0],...stacks.map(s=>[s.cx,s.cy,s.top])].map(([x,y,z])=>{const q=new THREE.Vector3(x,y,z).project(camera);return Math.max(Math.abs(q.x),Math.abs(q.y));})),stackOnScreen:()=>{if(!selected)return null;const s=selected,y=z=>new THREE.Vector3(s.cx,s.cy,z).project(camera).y;return [y(0),y(s.top)];},pickedSlab:()=>paintedPick?detailRow:null,orbitOffset:()=>selected?Math.hypot(controls.target.x-selected.cx,controls.target.y-selected.cy):null};
 return { setContext, contextStatus(t){ ctxNote.textContent=t; } };
 }};
