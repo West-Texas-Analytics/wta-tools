@@ -105,7 +105,7 @@ atlases.forEach(a=>a.tex.needsUpdate=true);
 const slabGroup=new THREE.Group(); scene.add(slabGroup);
 const autoT=document.getElementById('autoT'), minN=document.getElementById('minN');
 minN.max=Math.max(3,Math.min(20,maxN));
-let selected=null, hoverRow=null;
+let selected=null, hoverRow=null, detailRow=null;
 function slabT(s){const base=SLAB_FT/U; return autoT.checked? base*Math.min(4,Math.max(1,Math.sqrt(s.area)/14)) : base;}
 function shapesOf(polys){return polys.filter(r=>r[0]&&r[0].length>=3).map(rings=>{const sh=new THREE.Shape(rings[0].map(v2));rings.slice(1).forEach(h=>sh.holes.push(new THREE.Path(h.map(v2))));return sh;});}
 function labelQuads(s,pos,uv){
@@ -189,7 +189,8 @@ function restyle(){
     o.mesh.material.opacity=dim?0.25:1; o.mesh.material.depthWrite=!dim;
     o.edges.material.opacity=dim?0.12:0.45; o.labels.material.opacity=dim?0.2:1;});
   beaconBalls.material.opacity=beaconLines.material.opacity=selected?0.2:1;
-  if(selected&&hoverRow!=null){const s=selected,EP=s.edgeOne,z=s.base[hoverRow],a=new Float32Array(EP.length);for(let j=0;j<EP.length;j+=3){a[j]=EP[j];a[j+1]=EP[j+1];a[j+2]=EP[j+2]+z;}
+  const hr=hoverRow!=null?hoverRow:detailRow;
+  if(selected&&hr!=null){const s=selected,EP=s.edgeOne,z=s.base[hr],a=new Float32Array(EP.length);for(let j=0;j<EP.length;j+=3){a[j]=EP[j];a[j+1]=EP[j+1];a[j+2]=EP[j+2]+z;}
     hl.geometry.dispose(); hl.geometry=new THREE.BufferGeometry(); hl.geometry.setAttribute('position',new THREE.BufferAttribute(a,3)); hl.visible=true;}
   else hl.visible=false;
 }
@@ -201,7 +202,8 @@ function setNDC(e){const r=renderer.domElement.getBoundingClientRect();ndc.set((
 function groundAt(e){setNDC(e);ray.setFromCamera(ndc,camera);const p=new THREE.Vector3();return ray.ray.intersectPlane(groundPlane,p)?p:null;}
 renderer.domElement.addEventListener('wheel',e=>{
   e.preventDefault(); e.stopImmediatePropagation(); stopAnim();
-  const p=groundAt(e)||controls.target.clone(); const f=Math.pow(1.0015,e.deltaY);
+  // With a stack selected, zoom straight in and out on it so it stays the center of orbit; otherwise zoom toward the cursor.
+  const p=selected?controls.target.clone():(groundAt(e)||controls.target.clone()); const f=Math.pow(1.0015,e.deltaY);
   const d=camera.position.distanceTo(controls.target);
   const nf=(d*f<MIND)?MIND/d:(d*f>MAXD?MAXD/d:f);
   camera.position.sub(p).multiplyScalar(nf).add(p); controls.target.sub(p).multiplyScalar(nf).add(p);
@@ -229,30 +231,77 @@ function fit(){flyTo(new THREE.Vector3(county.cx,county.cy,0),county.r*2.4,45*D2
 
 // ---------- selection + inspector ----------
 const fmt=(k,v)=>v==null||v===''?'—':typeof v==='number'?v.toLocaleString('en-US',{maximumFractionDigits:3}):String(v);
-function focusStack(s){
-  selected=s; hoverRow=null; restyle(); renderInspector(); renderList();
-  const r=Math.sqrt(s.area)*0.9, shown=Math.min(s.n,8), h=0.6+shown*(s.t*1.25);
-  flyTo(new THREE.Vector3(s.cx,s.cy,h*0.45),Math.max(55,r*3.4,h*2.4),62*D2R);
+function focusStack(s,from){
+  const first=selected!==s;
+  selected=s; hoverRow=null; detailRow=null; restyle(); renderInspector(first?from||'stack':null); renderList();
+  // Frame the whole stack, top slab included, however tall it is.
+  const side=Math.sqrt(s.area), h=s.top, P=62*D2R, tanH=Math.tan(20*D2R);
+  const tall=h*Math.sin(P)+side*Math.cos(P), wide=side*1.2/Math.max(0.5,camera.aspect);
+  const d=Math.min(MAXD,Math.max(55,side*3,1.3*Math.max(tall,wide)/2/tanH));
+  flyTo(new THREE.Vector3(s.cx,s.cy,h*0.5),d,P);
 }
-function flyToRow(s,i){hoverRow=i;restyle();renderInspector();const r=Math.sqrt(s.area)*0.9;flyTo(new THREE.Vector3(s.cx,s.cy,s.base[i]+s.t/2),Math.max(45,r*2.4,s.t*7),70*D2R,undefined,800);}
-function clearSel(){selected=null;hoverRow=null;restyle();renderInspector();renderList();}
-function renderInspector(){
-  const el=document.getElementById('insp');
-  if(!selected){el.innerHTML=`<div class="insp-empty">Click a stack in the view or the list to see its rows. Cells that differ between rows are highlighted. Click a row to fly to that slab, which helps on the tall stacks.</div>`;return;}
+function flyToRow(s,i,from){hoverRow=i;showSlab(s,i,from);const r=Math.sqrt(s.area)*0.9;flyTo(new THREE.Vector3(s.cx,s.cy,s.base[i]+s.t/2),Math.max(45,r*2.4,s.t*7),70*D2R,undefined,800);}
+function clearSel(){selected=null;hoverRow=null;detailRow=null;restyle();renderInspector();renderList();}
+function showSlab(s,i,how){const opening=selected!==s||insp.hidden; selected=s; detailRow=i; restyle(); renderInspector(how||(opening?'stack':'swap')); renderList();}
+function backToRows(){detailRow=null;hoverRow=null;restyle();renderInspector('swap');}
+// ---------- the box over the 3D view: a stack's rows, or every field of one slab ----------
+// It opens with a short "lid" animation: a thin strip flies out of the clicked slab, then unfolds downward.
+const insp=document.getElementById('insp');
+let lastPt=null;   // where the last click on the 3D view landed, so the box can open out of that slab
+function openAnim(how){
+  if(how==='none'||reduce||!insp.animate) return;
+  if(how==='swap'){insp.querySelectorAll('.box-body').forEach(b=>b.animate([{opacity:0,transform:'translateY(-6px)'},{opacity:1,transform:'none'}],{duration:220,easing:'ease-out'}));return;}
+  const vr=view.getBoundingClientRect(), br=insp.getBoundingClientRect();
+  let dx=0, dy=-20;
+  if(how==='slab'&&lastPt){dx=lastPt.x-vr.left-(br.left-vr.left+br.width/2); dy=lastPt.y-vr.top-(br.top-vr.top);}
+  insp.animate([
+    {transform:`translate(${dx}px,${dy}px) scale(.08,.02)`,opacity:.5,offset:0,easing:'cubic-bezier(.25,.6,.3,1)'},
+    {transform:'translate(0,0) scale(1,.03)',opacity:1,offset:.4,easing:'cubic-bezier(.3,.55,.2,1)'},
+    {transform:'none',opacity:1,offset:1}],{duration:620});
+  insp.querySelectorAll('.box-body').forEach(b=>b.animate([{opacity:0},{opacity:0,offset:.5},{opacity:1}],{duration:700}));
+}
+function renderInspector(how){
+  if(!selected){insp.hidden=true;insp.innerHTML='';return;}
   const s=selected,c=causes[s.cause];
   const differ=fields.filter(f=>new Set(s.rows.map(r=>String(r[f]??''))).size>1), same=fields.filter(f=>!differ.includes(f));
-  el.innerHTML=`<div class="insp"><h3>${s.n} rows on one footprint</h3>
-    <div class="pills"><span class="pill ${c.kind}">${esc(c.label)}</span><span class="pill">${s.exact?'Exact match':'Matched after cleanup'}</span><span class="pill">${s.acres.toLocaleString('en-US')} ac shape</span></div></div>
-    <div><span class="lbl">Rows, bottom slab first</span><div class="tbl"><table><thead><tr><th>#</th>${differ.map(f=>`<th>${esc(f)}</th>`).join('')}</tr></thead><tbody>
-    ${s.rows.map((r,i)=>`<tr data-i="${i}" class="${hoverRow===i?'hl':''}"><td>${i+1}</td>${differ.map(f=>`<td class="diff">${esc(fmt(f,r[f]))}</td>`).join('')}</tr>`).join('')}
-    </tbody></table></div></div>
-    <div class="same"><b>Same on every row:</b> ${same.map(f=>`${esc(f)} <span style="color:var(--ink)">${esc(fmt(f,s.rows[0][f]))}</span>`).join(' · ')||'none'}</div>
-    <div class="btns"><button class="btn" id="iZoom">Zoom to stack</button><button class="btn" id="iClear">Back to county</button></div>`;
-  el.querySelectorAll('tbody tr').forEach(tr=>{const i=+tr.dataset.i;
-    tr.addEventListener('mouseenter',()=>{hoverRow=i;restyle();}); tr.addEventListener('mouseleave',()=>{hoverRow=null;restyle();});
-    tr.addEventListener('click',()=>flyToRow(s,i));});
-  el.querySelector('#iZoom').onclick=()=>focusStack(s);
-  el.querySelector('#iClear').onclick=()=>{clearSel();fit();};
+  const head=`<div class="card-h"><div><b>${s.n} rows on one footprint</b>
+      <div class="pills"><span class="pill ${c.kind}">${esc(c.label)}</span><span class="pill">${s.exact?'Exact match':'Matched after cleanup'}</span><span class="pill">${s.acres.toLocaleString('en-US')} ac shape</span></div></div>
+      <button class="btn card-x" id="iClose" aria-label="Close" title="Close (Esc)">✕</button></div>`;
+  let body;
+  if(detailRow!=null){
+    const i=detailRow, r=s.rows[i], rec=(s.recs||[])[i]||{}, cols=D.columns||[];
+    const others=cols.filter(k=>rec[k]!=null&&rec[k]!=='');
+    body=`<div class="box-body"><div class="card-row"><button class="btn" id="iBack">‹ All ${s.n} rows</button><span class="card-sub">Slab ${i+1} of ${s.n} · bottom is 1</span></div>
+      <dl class="kv">${fields.map(f=>`<dt>${esc(f)}</dt><dd class="${differ.includes(f)?'diff':''}">${esc(fmt(f,r[f]))}</dd>`).join('')}</dl>
+      ${others.length?`<details class="card-more"><summary>All ${others.length} filled columns in the file</summary><dl class="kv">${others.map(k=>`<dt>${esc(k)}</dt><dd>${esc(fmt(k,rec[k]))}</dd>`).join('')}</dl></details>`:''}
+      <div class="card-nav"><button class="btn" id="iDn" ${i===0?'disabled':''}>▼ Slab below</button><button class="btn" id="iUp" ${i===s.n-1?'disabled':''}>▲ Slab above</button></div></div>`;
+  }else{
+    body=`<div class="box-body"><div><span class="lbl">Rows, bottom slab first · click one for all its data</span><div class="tbl"><table><thead><tr><th>#</th>${differ.map(f=>`<th>${esc(f)}</th>`).join('')}</tr></thead><tbody>
+      ${s.rows.map((r,i)=>`<tr data-i="${i}" class="${hoverRow===i?'hl':''}"><td>${i+1}</td>${differ.map(f=>`<td class="diff">${esc(fmt(f,r[f]))}</td>`).join('')}</tr>`).join('')}
+      </tbody></table></div></div>
+      <div class="same"><b>Same on every row:</b> ${same.map(f=>`${esc(f)} <span style="color:var(--ink)">${esc(fmt(f,s.rows[0][f]))}</span>`).join(' · ')||'none'}</div>
+      <div class="btns"><button class="btn" id="iZoom">Zoom to stack</button><button class="btn" id="iClear">Back to county</button></div></div>`;
+  }
+  insp.innerHTML=head+body; insp.hidden=false;
+  insp.querySelector('#iClose').onclick=clearSel;
+  if(detailRow!=null){
+    insp.querySelector('#iBack').onclick=backToRows;
+    insp.querySelector('#iDn').onclick=()=>flyToRow(s,detailRow-1,'swap');
+    insp.querySelector('#iUp').onclick=()=>flyToRow(s,detailRow+1,'swap');
+  }else{
+    insp.querySelectorAll('tbody tr').forEach(tr=>{const i=+tr.dataset.i;
+      tr.addEventListener('mouseenter',()=>{hoverRow=i;restyle();}); tr.addEventListener('mouseleave',()=>{hoverRow=null;restyle();});
+      tr.addEventListener('click',()=>flyToRow(s,i,'swap'));});
+    insp.querySelector('#iZoom').onclick=()=>focusStack(s);
+    insp.querySelector('#iClear').onclick=()=>{clearSel();fit();};
+  }
+  if(how) openAnim(how);
+}
+// Reset: back to how the view looked when it was built.
+function resetView(){
+  clearSel(); minN.value=minN.min; document.getElementById('minNv').textContent=minN.value; applyVisibility(); paintBeacons(); renderList();
+  const f=document.getElementById('find'); f.value='';
+  fit();
 }
 function renderList(){
   const vis=stacks.filter(s=>s.visible);
@@ -279,7 +328,7 @@ function hitSlab(e){
 renderer.domElement.addEventListener('pointerup',e=>{
   if(!down)return; const moved=Math.hypot(e.clientX-down.x,e.clientY-down.y); down=null; if(moved>5||e.button!==0)return;
   const h=hitSlab(e);
-  if(h){ if(selected===h.s){hoverRow=h.i;restyle();renderInspector();} else focusStack(h.s); }
+  if(h){ lastPt={x:e.clientX,y:e.clientY}; if(selected!==h.s) focusStack(h.s,'none'); showSlab(h.s,h.i,'slab'); }
   else if(selected) clearSel();
 });
 renderer.domElement.addEventListener('dblclick',e=>{if(hitSlab(e))return;const p=groundAt(e);if(p){const a=sph();flyTo(p,Math.max(40,a.d*0.4));}});
@@ -311,14 +360,14 @@ renderer.domElement.addEventListener('keydown',e=>{
   else if(k==='-'||k==='_')flyTo(controls.target.clone(),Math.min(MAXD,a.d*1.33),a.phi,a.th,250);
   else if(k==='n')step(1); else if(k==='p')step(-1);
   else if(k==='t')flyTo(controls.target.clone(),a.d,a.phi<0.1?55*D2R:0.02,a.th);
-  else if(k==='home'){clearSel();fit();}
-  else if(k==='escape')clearSel();
+  else if(k==='home')resetView();
+  else if(k==='escape'){ if(detailRow!=null) backToRows(); else clearSel(); }
   else used=false;
   if(used)e.preventDefault();
 });
 
 // ---------- buttons ----------
-document.getElementById('bFit').onclick=()=>{clearSel();fit();};
+document.getElementById('bFit').onclick=resetView;
 document.getElementById('b2d').onclick=()=>{const a=sph();flyTo(controls.target.clone(),a.d,0.02,a.th);};
 document.getElementById('b3d').onclick=()=>{const a=sph();flyTo(controls.target.clone(),a.d,58*D2R,a.th);};
 const north=()=>{const a=sph();flyTo(controls.target.clone(),a.d,a.phi,-Math.PI/2,600);};
@@ -406,5 +455,7 @@ function setContext(ctx){
 }
 try{ if(localStorage.getItem('wta-stacks-ctx')==='off') ctxOn.checked=false; }catch(e){}
 ctxOn.onchange=()=>{ctxGroup.visible=ctxOn.checked; try{localStorage.setItem('wta-stacks-ctx',ctxOn.checked?'on':'off');}catch(e){}};
+// for the page tests: how far the orbit point is from the selected stack's center line (scene units)
+window.__wtaStacks={orbitOffset:()=>selected?Math.hypot(controls.target.x-selected.cx,controls.target.y-selected.cy):null};
 return { setContext, contextStatus(t){ ctxNote.textContent=t; } };
 }};
