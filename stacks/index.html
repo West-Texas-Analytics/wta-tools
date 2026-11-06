@@ -17,7 +17,7 @@
     --sky:#24394A; --ink:#1A2A37; --ink-2:#4A5560; --muted:#5E6670; --cream:#FFF6D8; --ground:#FDF4D9; --paper:#FFFBEF;
     --line:#E7DCC0; --sun:#D98A3D; --sun-soft:#F5EACB; --band-muted:#B7C2CC;
     --ok:#2F5639; --bad:#8E2F22; --warn:#7A4610;
-    --scene-bg:#EFE6D3; --scene-ground:#E8DCC4; --scene-line:#B9A887;
+    --scene-bg:#3A3E42; --scene-ground:#E8DCC4; --scene-line:#B9A887;
     --display: Bitter, Georgia, serif; --font: Roboto, system-ui, sans-serif; --mono: "Roboto Mono", ui-monospace, Menlo, monospace;
     color-scheme: light;
   }
@@ -87,13 +87,13 @@
   .status { color: var(--muted); font-size: 13px; }
 
   /* Step 3: the viewer (from wta-stacks) */
-  .vtop { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px 24px; margin-bottom: 10px; }
+  .vtop { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr) max-content; align-items: end; gap: 8px 24px; margin-bottom: 10px; }
   .vtop h2 { font-size: 22px; margin: 0; }
   .vtop .sub { color: var(--ink-2); font-size: 13px; }
   .vtop .acts { display: flex; gap: 8px; flex-wrap: wrap; }
   /* Viewing: use the whole window width, and fill the window height below the title row. */
   body.viewing main { max-width: none; padding-top: 14px; }
-  .app { display: grid; grid-template-columns: 260px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); height: max(560px, calc(100vh - 175px)); }
+  .app { display: grid; grid-template-columns: 400px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); height: max(560px, calc(100vh - 205px)); }
   .panel { padding: 14px; overflow: auto; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
   .panel.left { border-right: 1px solid var(--line); }
   .lbl { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-2); font-weight: 600; margin-bottom: 6px; display: block; }
@@ -124,15 +124,20 @@
   .tools .btn { background: var(--paper); min-width: 92px; text-align: left; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
   .compass { position: absolute; right: 12px; bottom: 12px; width: 54px; height: 54px; border-radius: 50%; background: var(--paper); border: 1px solid var(--line); cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.15); }
   .compass svg { width: 100%; height: 100%; }
-  .hint { position: absolute; left: 10px; bottom: 10px; font-size: 11.5px; color: var(--ink-2); background: color-mix(in srgb, var(--paper) 88%, transparent); padding: 6px 9px; border-radius: 5px; line-height: 1.55; max-width: calc(100% - 90px); }
+  .below { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 20px; margin-top: 8px; }
+  .below .note { margin: 0; }
+  .hint { font-size: 11.5px; color: var(--ink-2); line-height: 1.7; }
+  .filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 10px; justify-content: center; }
+  .filters label:not(.check) { display: grid; gap: 2px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--ink-2); font-weight: 600; }
+  .filters select, .filters input[type=text] { height: 32px; font: inherit; font-size: 13px; letter-spacing: 0; text-transform: none; font-weight: 400; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; background: var(--paper); padding: 0 8px; min-width: 120px; }
+  .filters .grow input { min-width: 0; width: 170px; }
+  .filters .checks { display: grid; gap: 2px; padding-bottom: 2px; }
+  .insp-panel { display: grid; gap: 12px; align-content: start; min-height: 0; }
+  .insp-h { font: 700 16px/1.25 var(--display); margin: 0; }
   .hint kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; background: var(--ground); }
   .tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--paper); font-size: 12px; padding: 5px 8px; border-radius: 4px; white-space: nowrap; transform: translate(12px, 12px); }
   .scale { position: absolute; left: 10px; top: 10px; font-size: 11px; color: var(--ink-2); background: color-mix(in srgb, var(--paper) 88%, transparent); padding: 4px 8px; border-radius: 4px; font-variant-numeric: tabular-nums; }
-  .card3d { position: absolute; z-index: 4; left: 10px; top: 40px; width: min(420px, calc(100% - 140px)); max-height: calc(100% - 120px); overflow: auto; transform-origin: 50% 0; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 22px rgba(26,42,55,.22); padding: 12px 14px; font-size: 12.5px; display: grid; gap: 10px; }
-  .card-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
-  .card-h b { font: 700 15px/1.2 var(--display); }
   .card-sub { color: var(--ink-2); font-variant-numeric: tabular-nums; }
-  .card-x { padding: 2px 8px; }
   .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 0; }
   .kv dt { color: var(--ink-2); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; padding-top: 1px; }
   .kv dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
@@ -147,7 +152,7 @@
   .pill { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); }
   .pill.bad { color: var(--bad); border-color: var(--bad); }
   .pill.ok { color: var(--ok); border-color: var(--ok); }
-  .tbl { overflow: auto; border: 1px solid var(--line); border-radius: 5px; max-height: 300px; }
+  .tbl { overflow: auto; border: 1px solid var(--line); border-radius: 5px; max-height: 380px; }
   table { border-collapse: collapse; font-size: 12px; width: 100%; }
   th, td { padding: 5px 7px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; font-variant-numeric: tabular-nums; }
   th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2); background: var(--ground); position: sticky; top: 0; }
@@ -167,8 +172,12 @@
   .fact b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
   .fact span { font-size: 12.5px; color: var(--ink-2); }
 
+  @media (max-width: 1300px) {
+    .vtop { display: flex; flex-wrap: wrap; justify-content: space-between; }
+    .filters { order: 3; flex: 1 1 100%; justify-content: flex-start; }
+  }
   @media (max-width: 1100px) {
-    .app { grid-template-columns: 240px minmax(0, 1fr); height: auto; }
+    .app { grid-template-columns: 320px minmax(0, 1fr); height: auto; }
     .view { height: max(480px, calc(100vh - 175px)); }
     .panel.left { max-height: max(480px, calc(100vh - 175px)); }
   }
@@ -179,7 +188,6 @@
     .panel.left { border-right: 0; border-top: 1px solid var(--line); max-height: none; }
     .tools .btn { min-width: 0; font-size: 11.5px; padding: 4px 8px; }
     .hint { display: none; }
-    .card3d { width: calc(100% - 20px); top: 36px; max-height: calc(100% - 46px); }
     .facts { grid-template-columns: 1fr 1fr; }
     .form { grid-template-columns: 1fr; }
     .form .hintv { grid-column: 1; }
@@ -264,6 +272,13 @@
         <h2 id="hTitle"></h2>
         <div class="sub" id="hSub"></div>
       </div>
+      <div class="filters" role="group" aria-label="Filters">
+        <label><span>Likely cause</span><select id="fCause"></select></label>
+        <label><span>State code</span><select id="fUse"></select></label>
+        <label class="grow"><span>Account or owner</span><input type="text" id="find" placeholder="Type 2+ letters" autocomplete="off"></label>
+        <div class="checks"><label class="check"><input type="checkbox" id="ctxOn" checked> Roads and towns</label>
+          <label class="check"><input type="checkbox" id="autoT" checked> Thicker on big tracts</label></div>
+      </div>
       <div class="acts">
         <button class="pbtn ghost" id="csv" type="button">Download stacked rows (CSV)</button>
         <button class="pbtn ghost" id="another" type="button">Open another file</button>
@@ -281,24 +296,7 @@
           <label class="lbl" for="minN">Show stacks with at least <span id="minNv">2</span> rows</label>
           <input type="range" id="minN" min="2" max="20" value="2">
         </div>
-        <div>
-          <span class="lbl">Slabs · 80 ft each</span>
-          <div class="row"><label for="autoT">Thicker on big tracts</label><input type="checkbox" id="autoT" checked></div>
-        </div>
-        <div>
-          <span class="lbl">Map</span>
-          <div class="row"><label for="ctxOn">Roads and town names</label><input type="checkbox" id="ctxOn" checked></div>
-          <div class="note" id="ctxNote">Loading roads and towns…</div>
-        </div>
-        <div>
-          <label class="lbl" for="find">Find account or owner</label>
-          <input type="text" id="find" placeholder="Account number or owner name" autocomplete="off">
-        </div>
-        <div style="min-height:0">
-          <div class="row" style="margin-bottom:6px"><span class="lbl" style="margin:0">Stacks</span>
-            <span class="btns"><button class="btn" id="prev" title="Previous stack (P)">‹ Prev</button><button class="btn" id="next" title="Next stack (N)">Next ›</button></span></div>
-          <div class="stacklist" id="list"></div>
-        </div>
+        <section class="insp-panel" id="insp" aria-label="Stacks and the selected stack" aria-live="polite"></section>
       </aside>
       <div class="view" id="view">
         <div class="loading" id="loading">Building the parcel layer…</div>
@@ -311,13 +309,15 @@
         <div class="compass" id="compass" title="Click to face north" role="button" tabindex="0" aria-label="Face north">
           <svg viewBox="0 0 54 54"><g id="needle" transform="rotate(0 27 27)"><polygon points="27,7 32,27 22,27" fill="var(--bad)"/><polygon points="27,47 32,27 22,27" fill="var(--ink-2)"/><text x="27" y="6.5" text-anchor="middle" font-size="7" font-family="Roboto, sans-serif" fill="var(--ink)" font-weight="700">N</text></g></svg>
         </div>
+        <div class="tip" id="tip" hidden></div>
+      </div>
+    </div>
+    <div class="below">
         <div class="hint">
           <kbd>Drag</kbd> orbit · <kbd>Right-drag</kbd> or <kbd>Shift+drag</kbd> pan · <kbd>Scroll</kbd> zoom (on the stack when one is open)<br>
           <kbd>Click</kbd> a slab to open its data · <kbd>Home</kbd> reset · <kbd>N</kbd>/<kbd>P</kbd> next/prev · <kbd>Q</kbd>/<kbd>E</kbd> rotate · <kbd>Esc</kbd> or click empty ground to clear
         </div>
-        <div class="tip" id="tip" hidden></div>
-        <aside class="card3d" id="insp" aria-label="Selected stack" hidden></aside>
-      </div>
+      <div class="note" id="ctxNote">Loading roads and towns…</div>
     </div>
     <div class="plan">
       <section>

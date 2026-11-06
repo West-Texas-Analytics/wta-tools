@@ -151,9 +151,12 @@ function buildStack(s){
   s.obj={mesh,edges,labels}; slabGroup.add(mesh,edges,labels);
   paintStack(s);
 }
+const PICK=new THREE.Color('#FFD84A'), WASH=new THREE.Color('#FFFFFF');
+let paintedPick=null;   // the stack whose clicked slab is drawn highlighted
 function paintStack(s){
   const col=s.obj.mesh.geometry.attributes.color, a=col.array;
-  s.rows.forEach((r,i)=>{const c=colorFor(s,r);for(let j=i*s.vc;j<(i+1)*s.vc;j++){a[j*3]=c.r;a[j*3+1]=c.g;a[j*3+2]=c.b;}});
+  const pick=s===selected&&detailRow!=null?detailRow:null;
+  s.rows.forEach((r,i)=>{const c=pick==null?colorFor(s,r):i===pick?PICK:colorFor(s,r).clone().lerp(WASH,0.6);for(let j=i*s.vc;j<(i+1)*s.vc;j++){a[j*3]=c.r;a[j*3+1]=c.g;a[j*3+2]=c.b;}});
   col.needsUpdate=true;
 }
 // beacons: pins over small footprints so town-lot stacks stay findable at county zoom
@@ -182,13 +185,16 @@ function buildAll(){
   stacks.forEach(s=>{if(s.obj){Object.values(s.obj).forEach(o=>{o.geometry.dispose();o.material.dispose();});}});
   slabGroup.clear(); stacks.forEach(buildStack); applyVisibility(); buildBeacons(); restyle();
 }
-function applyVisibility(){stacks.forEach(s=>{s.visible=s.n>=+minN.value; Object.values(s.obj).forEach(o=>o.visible=s.visible);});}
-const hl=new THREE.LineSegments(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({color:0xD98A3D})); hl.renderOrder=5; scene.add(hl);
+function applyVisibility(){stacks.forEach(s=>{s.visible=passes(s); Object.values(s.obj).forEach(o=>o.visible=s.visible);});}
+const hl=new THREE.LineSegments(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({color:0x1A2A37})); hl.renderOrder=5; scene.add(hl);
 function restyle(){
   stacks.forEach(s=>{const dim=selected&&selected!==s; const o=s.obj;
     o.mesh.material.opacity=dim?0.25:1; o.mesh.material.depthWrite=!dim;
     o.edges.material.opacity=dim?0.12:0.45; o.labels.material.opacity=dim?0.2:1;});
   beaconBalls.material.opacity=beaconLines.material.opacity=selected?0.2:1;
+  const want=selected&&detailRow!=null?selected:null;
+  if(paintedPick&&paintedPick!==want) paintStack(paintedPick);
+  if(want) paintStack(want); paintedPick=want;
   const hr=hoverRow!=null?hoverRow:detailRow;
   if(selected&&hr!=null){const s=selected,EP=s.edgeOne,z=s.base[hr],a=new Float32Array(EP.length);for(let j=0;j<EP.length;j+=3){a[j]=EP[j];a[j+1]=EP[j+1];a[j+2]=EP[j+2]+z;}
     hl.geometry.dispose(); hl.geometry=new THREE.BufferGeometry(); hl.geometry.setAttribute('position',new THREE.BufferAttribute(a,3)); hl.visible=true;}
@@ -231,85 +237,92 @@ function fit(){flyTo(new THREE.Vector3(county.cx,county.cy,0),county.r*2.4,45*D2
 
 // ---------- selection + inspector ----------
 const fmt=(k,v)=>v==null||v===''?'—':typeof v==='number'?v.toLocaleString('en-US',{maximumFractionDigits:3}):String(v);
-function focusStack(s,from){
-  const first=selected!==s;
-  selected=s; hoverRow=null; detailRow=null; restyle(); renderInspector(first?from||'stack':null); renderList();
+function focusStack(s){
+  selected=s; hoverRow=null; detailRow=null; restyle(); renderInspector(); renderList();
   // Frame the whole stack, top slab included, however tall it is.
   const side=Math.sqrt(s.area), h=s.top, P=62*D2R, tanH=Math.tan(20*D2R);
   const tall=h*Math.sin(P)+side*Math.cos(P), wide=side*1.2/Math.max(0.5,camera.aspect);
   const d=Math.min(MAXD,Math.max(55,side*3,1.3*Math.max(tall,wide)/2/tanH));
   flyTo(new THREE.Vector3(s.cx,s.cy,h*0.5),d,P);
 }
-function flyToRow(s,i,from){hoverRow=i;showSlab(s,i,from);const r=Math.sqrt(s.area)*0.9;flyTo(new THREE.Vector3(s.cx,s.cy,s.base[i]+s.t/2),Math.max(45,r*2.4,s.t*7),70*D2R,undefined,800);}
+function flyToRow(s,i){hoverRow=i;showSlab(s,i);const r=Math.sqrt(s.area)*0.9;flyTo(new THREE.Vector3(s.cx,s.cy,s.base[i]+s.t/2),Math.max(45,r*2.4,s.t*7),70*D2R,undefined,800);}
 function clearSel(){selected=null;hoverRow=null;detailRow=null;restyle();renderInspector();renderList();}
-function showSlab(s,i,how){const opening=selected!==s||insp.hidden; selected=s; detailRow=i; restyle(); renderInspector(how||(opening?'stack':'swap')); renderList();}
-function backToRows(){detailRow=null;hoverRow=null;restyle();renderInspector('swap');}
-// ---------- the box over the 3D view: a stack's rows, or every field of one slab ----------
-// It opens with a short "lid" animation: a thin strip flies out of the clicked slab, then unfolds downward.
+function showSlab(s,i){selected=s; detailRow=i; restyle(); renderInspector(); renderList();}
+function backToRows(){detailRow=null;hoverRow=null;restyle();renderInspector();}
+// ---------- left panel, below the row slider: the stack list, a stack's rows, or every field of one slab ----------
 const insp=document.getElementById('insp');
-let lastPt=null;   // where the last click on the 3D view landed, so the box can open out of that slab
-function openAnim(how){
-  if(how==='none'||reduce||!insp.animate) return;
-  if(how==='swap'){insp.querySelectorAll('.box-body').forEach(b=>b.animate([{opacity:0,transform:'translateY(-6px)'},{opacity:1,transform:'none'}],{duration:220,easing:'ease-out'}));return;}
-  const vr=view.getBoundingClientRect(), br=insp.getBoundingClientRect();
-  let dx=0, dy=-20;
-  if(how==='slab'&&lastPt){dx=lastPt.x-vr.left-(br.left-vr.left+br.width/2); dy=lastPt.y-vr.top-(br.top-vr.top);}
-  insp.animate([
-    {transform:`translate(${dx}px,${dy}px) scale(.08,.02)`,opacity:.5,offset:0,easing:'cubic-bezier(.25,.6,.3,1)'},
-    {transform:'translate(0,0) scale(1,.03)',opacity:1,offset:.4,easing:'cubic-bezier(.3,.55,.2,1)'},
-    {transform:'none',opacity:1,offset:1}],{duration:620});
-  insp.querySelectorAll('.box-body').forEach(b=>b.animate([{opacity:0},{opacity:0,offset:.5},{opacity:1}],{duration:700}));
-}
-function renderInspector(how){
-  if(!selected){insp.hidden=true;insp.innerHTML='';return;}
+function renderInspector(){
+  if(!selected){
+    const vis=stacks.filter(s=>s.visible);
+    insp.innerHTML=`<div class="row" style="margin-bottom:6px"><span class="lbl" style="margin:0">Stacks · ${fmtInt(vis.length)} shown</span>
+        <span class="btns"><button class="btn" id="prev" title="Previous stack (P)">‹ Prev</button><button class="btn" id="next" title="Next stack (N)">Next ›</button></span></div>
+      <div class="stacklist" id="list">${vis.map(s=>`<button data-id="${s.id}"><span class="n">${s.n}</span><span class="t">${esc(causes[s.cause].label)} <small>· ${esc(s.short)}</small></span></button>`).join('')||'<div class="note">No stacks match the filters.</div>'}</div>
+      <div class="note">Click a stack here or in the view to see its rows. Click a slab to see everything in that row.</div>`;
+    insp.querySelectorAll('#list button').forEach(b=>b.onclick=()=>focusStack(stacks[+b.dataset.id]));
+    insp.querySelector('#prev').onclick=()=>step(-1); insp.querySelector('#next').onclick=()=>step(1);
+    return;
+  }
   const s=selected,c=causes[s.cause];
   const differ=fields.filter(f=>new Set(s.rows.map(r=>String(r[f]??''))).size>1), same=fields.filter(f=>!differ.includes(f));
-  const head=`<div class="card-h"><div><b>${s.n} rows on one footprint</b>
-      <div class="pills"><span class="pill ${c.kind}">${esc(c.label)}</span><span class="pill">${s.exact?'Exact match':'Matched after cleanup'}</span><span class="pill">${s.acres.toLocaleString('en-US')} ac shape</span></div></div>
-      <button class="btn card-x" id="iClose" aria-label="Close" title="Close (Esc)">✕</button></div>`;
+  const head=`<div class="card-row"><button class="btn" id="iAll">‹ All stacks</button>
+      <span class="btns" style="margin-left:auto"><button class="btn" id="prev" title="Previous stack (P)">‹ Prev</button><button class="btn" id="next" title="Next stack (N)">Next ›</button></span></div>
+    <div><h3 class="insp-h">${s.n} rows on one footprint</h3>
+      <div class="pills"><span class="pill ${c.kind}">${esc(c.label)}</span><span class="pill">${s.exact?'Exact match':'Matched after cleanup'}</span><span class="pill">${s.acres.toLocaleString('en-US')} ac shape</span></div></div>`;
   let body;
   if(detailRow!=null){
     const i=detailRow, r=s.rows[i], rec=(s.recs||[])[i]||{}, cols=D.columns||[];
     const others=cols.filter(k=>rec[k]!=null&&rec[k]!=='');
-    body=`<div class="box-body"><div class="card-row"><button class="btn" id="iBack">‹ All ${s.n} rows</button><span class="card-sub">Slab ${i+1} of ${s.n} · bottom is 1</span></div>
+    body=`<div class="card-row"><button class="btn" id="iBack">‹ All ${s.n} rows</button><span class="card-sub">Slab ${i+1} of ${s.n} · bottom is 1</span></div>
       <dl class="kv">${fields.map(f=>`<dt>${esc(f)}</dt><dd class="${differ.includes(f)?'diff':''}">${esc(fmt(f,r[f]))}</dd>`).join('')}</dl>
       ${others.length?`<details class="card-more"><summary>All ${others.length} filled columns in the file</summary><dl class="kv">${others.map(k=>`<dt>${esc(k)}</dt><dd>${esc(fmt(k,rec[k]))}</dd>`).join('')}</dl></details>`:''}
-      <div class="card-nav"><button class="btn" id="iDn" ${i===0?'disabled':''}>▼ Slab below</button><button class="btn" id="iUp" ${i===s.n-1?'disabled':''}>▲ Slab above</button></div></div>`;
+      <div class="card-nav"><button class="btn" id="iDn" ${i===0?'disabled':''}>▼ Slab below</button><button class="btn" id="iUp" ${i===s.n-1?'disabled':''}>▲ Slab above</button></div>`;
   }else{
-    body=`<div class="box-body"><div><span class="lbl">Rows, bottom slab first · click one for all its data</span><div class="tbl"><table><thead><tr><th>#</th>${differ.map(f=>`<th>${esc(f)}</th>`).join('')}</tr></thead><tbody>
+    body=`<div><span class="lbl">Rows, bottom slab first · click one for all its data</span><div class="tbl"><table><thead><tr><th>#</th>${differ.map(f=>`<th>${esc(f)}</th>`).join('')}</tr></thead><tbody>
       ${s.rows.map((r,i)=>`<tr data-i="${i}" class="${hoverRow===i?'hl':''}"><td>${i+1}</td>${differ.map(f=>`<td class="diff">${esc(fmt(f,r[f]))}</td>`).join('')}</tr>`).join('')}
       </tbody></table></div></div>
       <div class="same"><b>Same on every row:</b> ${same.map(f=>`${esc(f)} <span style="color:var(--ink)">${esc(fmt(f,s.rows[0][f]))}</span>`).join(' · ')||'none'}</div>
-      <div class="btns"><button class="btn" id="iZoom">Zoom to stack</button><button class="btn" id="iClear">Back to county</button></div></div>`;
+      <div class="btns"><button class="btn" id="iZoom">Zoom to stack</button><button class="btn" id="iClear">Back to county</button></div>`;
   }
-  insp.innerHTML=head+body; insp.hidden=false;
-  insp.querySelector('#iClose').onclick=clearSel;
+  insp.innerHTML=head+body;
+  insp.querySelector('#iAll').onclick=clearSel;
+  insp.querySelector('#prev').onclick=()=>step(-1); insp.querySelector('#next').onclick=()=>step(1);
   if(detailRow!=null){
     insp.querySelector('#iBack').onclick=backToRows;
-    insp.querySelector('#iDn').onclick=()=>flyToRow(s,detailRow-1,'swap');
-    insp.querySelector('#iUp').onclick=()=>flyToRow(s,detailRow+1,'swap');
+    insp.querySelector('#iDn').onclick=()=>flyToRow(s,detailRow-1);
+    insp.querySelector('#iUp').onclick=()=>flyToRow(s,detailRow+1);
   }else{
     insp.querySelectorAll('tbody tr').forEach(tr=>{const i=+tr.dataset.i;
       tr.addEventListener('mouseenter',()=>{hoverRow=i;restyle();}); tr.addEventListener('mouseleave',()=>{hoverRow=null;restyle();});
-      tr.addEventListener('click',()=>flyToRow(s,i,'swap'));});
+      tr.addEventListener('click',()=>flyToRow(s,i));});
     insp.querySelector('#iZoom').onclick=()=>focusStack(s);
     insp.querySelector('#iClear').onclick=()=>{clearSel();fit();};
   }
-  if(how) openAnim(how);
 }
+// ---------- filters (the bar above the view) ----------
+const fCause=document.getElementById('fCause'), fUse=document.getElementById('fUse'), fFind=document.getElementById('find');
+const useOf=r=>String(r['Land use']??'').trim().toUpperCase();
+fCause.innerHTML=`<option value="">All causes</option>`+Object.entries(causes).filter(([k])=>stacks.some(s=>s.cause===k)).map(([k,c])=>`<option value="${esc(k)}">${esc(c.label)}</option>`).join('')+`<option value="!bad">Probable errors only</option>`;
+const uses=[...new Set(stacks.flatMap(s=>s.rows.map(useOf)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'en',{numeric:true}));
+fUse.innerHTML=`<option value="">All state codes</option>`+uses.map(u=>`<option>${esc(u)}</option>`).join('');
+fUse.disabled=!uses.length; if(!uses.length) fUse.title='No state code / land use column in this file';
+function passes(s){
+  if(s.n<+minN.value) return false;
+  const c=fCause.value; if(c==='!bad'?causes[s.cause].kind!=='bad':c&&s.cause!==c) return false;
+  const u=fUse.value; if(u&&!s.rows.some(r=>useOf(r)===u)) return false;
+  const q=fFind.value.trim().toUpperCase(); if(q.length>=2&&!s.rows.some(r=>String(r.Account||'').toUpperCase().includes(q)||String(r.Owner||'').toUpperCase().includes(q))) return false;
+  return true;
+}
+function filtersChanged(){applyVisibility();paintBeacons();if(selected&&!selected.visible)clearSel();else{renderList();if(!selected)renderInspector();}}
 // Reset: back to how the view looked when it was built.
 function resetView(){
-  clearSel(); minN.value=minN.min; document.getElementById('minNv').textContent=minN.value; applyVisibility(); paintBeacons(); renderList();
-  const f=document.getElementById('find'); f.value='';
-  fit();
+  minN.value=minN.min; document.getElementById('minNv').textContent=minN.value; fCause.value=''; fUse.value=''; fFind.value='';
+  applyVisibility(); paintBeacons(); clearSel(); fit();
 }
 function renderList(){
   const vis=stacks.filter(s=>s.visible);
-  const list=document.getElementById('list');
-  list.innerHTML=vis.map(s=>`<button data-id="${s.id}" class="${selected===s?'on':''}"><span class="n">${s.n}</span><span class="t">${esc(causes[s.cause].label)} <small>· ${esc(s.short)}</small></span></button>`).join('');
-  list.querySelectorAll('button').forEach(b=>b.onclick=()=>focusStack(stacks[+b.dataset.id]));
   const rows=vis.reduce((a,s)=>a+s.n,0), bad=vis.filter(s=>causes[s.cause].kind==='bad').length;
   document.getElementById('stats').innerHTML=`<div><b>${fmtInt(vis.length)}</b>stacks</div><div><b>${fmtInt(rows)}</b>rows in stacks</div><div><b>${fmtInt(bad)}</b>probable errors</div><div><b>${fmtInt(D.parcels)}</b>parcels</div>`;
+  if(!selected){const L=insp.querySelector('#list'); if(L) L.querySelectorAll('button').forEach(b=>b.classList.remove('on'));}
 }
 function step(dir){const vis=stacks.filter(s=>s.visible);if(!vis.length)return;let i=selected?vis.indexOf(selected):-1;i=(i+dir+vis.length)%vis.length;focusStack(vis[i]);}
 
@@ -328,7 +341,7 @@ function hitSlab(e){
 renderer.domElement.addEventListener('pointerup',e=>{
   if(!down)return; const moved=Math.hypot(e.clientX-down.x,e.clientY-down.y); down=null; if(moved>5||e.button!==0)return;
   const h=hitSlab(e);
-  if(h){ lastPt={x:e.clientX,y:e.clientY}; if(selected!==h.s) focusStack(h.s,'none'); showSlab(h.s,h.i,'slab'); }
+  if(h){ if(selected!==h.s) focusStack(h.s); showSlab(h.s,h.i); }
   else if(selected) clearSel();
 });
 renderer.domElement.addEventListener('dblclick',e=>{if(hitSlab(e))return;const p=groundAt(e);if(p){const a=sph();flyTo(p,Math.max(40,a.d*0.4));}});
@@ -372,13 +385,11 @@ document.getElementById('b2d').onclick=()=>{const a=sph();flyTo(controls.target.
 document.getElementById('b3d').onclick=()=>{const a=sph();flyTo(controls.target.clone(),a.d,58*D2R,a.th);};
 const north=()=>{const a=sph();flyTo(controls.target.clone(),a.d,a.phi,-Math.PI/2,600);};
 const comp=document.getElementById('compass'); comp.onclick=north; comp.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();north();}};
-document.getElementById('prev').onclick=()=>step(-1);
-document.getElementById('next').onclick=()=>step(1);
 colorBy.onchange=()=>{legend();stacks.forEach(paintStack);paintBeacons();};
 autoT.onchange=()=>{buildAll(); if(selected) renderInspector();};
-minN.oninput=()=>{document.getElementById('minNv').textContent=minN.value;applyVisibility();paintBeacons();if(selected&&!selected.visible)clearSel();renderList();};
-document.getElementById('find').addEventListener('input',e=>{const q=e.target.value.trim().toUpperCase(); if(q.length<3)return;
-  const s=stacks.find(s=>s.visible&&s.rows.some(r=>String(r.Account||'').toUpperCase().includes(q)||String(r.Owner||'').toUpperCase().includes(q))); if(s&&s!==selected)focusStack(s);});
+minN.oninput=()=>{document.getElementById('minNv').textContent=minN.value;filtersChanged();};
+fCause.onchange=filtersChanged; fUse.onchange=filtersChanged;
+fFind.addEventListener('input',()=>{filtersChanged(); const q=fFind.value.trim(); if(q.length<3)return; const s=stacks.find(s=>s.visible); if(s&&s!==selected)focusStack(s);});
 
 // ---------- facts ----------
 const sumRows=stacks.reduce((a,s)=>a+s.n,0);
@@ -412,43 +423,49 @@ requestAnimationFrame(loop);
 // ---------- roads and towns (OpenStreetMap), drawn when setContext() is called ----------
 const ctxGroup=new THREE.Group(); scene.add(ctxGroup);
 const ctxOn=document.getElementById('ctxOn'), ctxNote=document.getElementById('ctxNote');
-const ROAD={local:{color:0x9E8C6A,w:2.2,z:0.2},fm:{color:0x5E6670,w:4,z:0.25},major:{color:0x2E3A45,w:6.5,z:0.3}};
+// Roads: a light center on a dark casing, so they read on both the dark surround and the sand parcels.
+const ROAD={local:{color:0xBDB5A6,w:1.6,z:0.2},fm:{color:0xE6DCC3,w:3,z:0.25},major:{color:0xF2C45A,w:5,z:0.3}}, CASING=0x1C1F22;
 const pxScale=px=>px*2/(800*(1/Math.tan(20*D2R)));   // sprite scale for about px pixels tall on a typical screen
-function textSprite(text,px,{weight=700,fg='#1A2A37',depth=true}={}){
+function textSprite(text,px,{weight=700,fg='#F7F3EA',halo='rgba(22,25,28,.88)',depth=true,alpha=1}={}){
   const c=document.createElement('canvas'),g=c.getContext('2d'),fs=40,font=`${weight} ${fs}px Roboto, "Segoe UI", sans-serif`;
   g.font=font; const w=Math.ceil(g.measureText(text).width+fs*0.7), h=Math.ceil(fs*1.45); c.width=w; c.height=h;
-  g.font=font; g.textAlign='center'; g.textBaseline='middle'; g.lineJoin='round'; g.lineWidth=fs*0.24; g.strokeStyle='rgba(255,251,239,.96)';
+  g.font=font; g.textAlign='center'; g.textBaseline='middle'; g.lineJoin='round'; g.lineWidth=fs*0.26; g.strokeStyle=halo;
   g.strokeText(text,w/2,h/2+1); g.fillStyle=fg; g.fillText(text,w/2,h/2+1);
   const tex=new THREE.CanvasTexture(c); tex.minFilter=THREE.LinearFilter;
-  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,sizeAttenuation:false,depthTest:depth,depthWrite:false,transparent:true}));
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,sizeAttenuation:false,depthTest:depth,depthWrite:false,transparent:true,opacity:alpha}));
   const k=pxScale(px); sp.scale.set(k*w/h,k,1); sp.renderOrder=depth?3:10; return sp;
 }
 function clearContext(){ctxGroup.traverse(o=>{if(o.geometry)o.geometry.dispose(); if(o.material){if(o.material.map)o.material.map.dispose(); o.material.dispose();}}); ctxGroup.clear();}
 function setContext(ctx){
   clearContext();
   for(const [cls,st] of Object.entries(ROAD)){
-    const tri=[], seg=[];
+    const tri=[], cas=[], seg=[];
+    const ribbon=(out,a,b,L,w,z)=>{const nx=-(b[1]-a[1])/L*w/2, ny=(b[0]-a[0])/L*w/2;
+      out.push(a[0]+nx,a[1]+ny,z, a[0]-nx,a[1]-ny,z, b[0]+nx,b[1]+ny,z, b[0]+nx,b[1]+ny,z, a[0]-nx,a[1]-ny,z, b[0]-nx,b[1]-ny,z);};
     ctx.roads.filter(r=>r.cls===cls).forEach(r=>{for(let i=1;i<r.pts.length;i++){const a=r.pts[i-1],b=r.pts[i],L=Math.hypot(b[0]-a[0],b[1]-a[1]); if(!L)continue;
-      const nx=-(b[1]-a[1])/L*st.w/2, ny=(b[0]-a[0])/L*st.w/2;
-      tri.push(a[0]+nx,a[1]+ny,st.z, a[0]-nx,a[1]-ny,st.z, b[0]+nx,b[1]+ny,st.z, b[0]+nx,b[1]+ny,st.z, a[0]-nx,a[1]-ny,st.z, b[0]-nx,b[1]-ny,st.z);
-      seg.push(a[0],a[1],st.z,b[0],b[1],st.z);}});
+      ribbon(cas,a,b,L,st.w+3,st.z-0.05); ribbon(tri,a,b,L,st.w,st.z); seg.push(a[0],a[1],st.z+0.01,b[0],b[1],st.z+0.01);}});
     if(!seg.length) continue;
-    const tg=new THREE.BufferGeometry(); tg.setAttribute('position',new THREE.Float32BufferAttribute(tri,3));
-    const lg=new THREE.BufferGeometry(); lg.setAttribute('position',new THREE.Float32BufferAttribute(seg,3));
-    ctxGroup.add(new THREE.Mesh(tg,new THREE.MeshBasicMaterial({color:st.color,side:THREE.DoubleSide})), new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:st.color})));
+    const geo=arr=>{const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(arr,3)); return g;};
+    ctxGroup.add(new THREE.Mesh(geo(cas),new THREE.MeshBasicMaterial({color:CASING,side:THREE.DoubleSide,transparent:true,opacity:0.7})),
+      new THREE.Mesh(geo(tri),new THREE.MeshBasicMaterial({color:st.color,side:THREE.DoubleSide})), new THREE.LineSegments(geo(seg),new THREE.LineBasicMaterial({color:st.color})));
   }
-  // road names: highways and farm roads, about one label every 4 miles of road
+  // road names: highways and farm roads only, about one label every 12 miles of road, and never two labels
+  // within about 3 miles of each other or of a town name
+  const placed=[], MILE=5280/U, near=(x,y,d)=>placed.some(p=>Math.hypot(p[0]-x,p[1]-y)<d);
+  const rank={city:0,town:1,village:2,hamlet:3};
+  const towns=ctx.towns.slice().sort((a,b)=>(rank[a.kind]??4)-(rank[b.kind]??4)).slice(0,40);
+  towns.forEach(t=>placed.push([t.x,t.y]));
   let nLab=0; const byName=new Map();
-  ctx.roads.filter(r=>r.label&&r.cls!=='local').forEach(r=>{(byName.get(r.label)||byName.set(r.label,[]).get(r.label)).push(r);});
+  ctx.roads.filter(r=>r.label&&r.cls!=='local').sort((a,b)=>(a.cls==='major'?0:1)-(b.cls==='major'?0:1)).forEach(r=>{(byName.get(r.label)||byName.set(r.label,[]).get(r.label)).push(r);});
   for(const [name,rs] of byName){
-    let carry=1050;
-    for(const r of rs) for(let i=1;i<r.pts.length&&nLab<300;i++){const a=r.pts[i-1],b=r.pts[i],L=Math.hypot(b[0]-a[0],b[1]-a[1]); carry+=L;
-      if(carry>=2100){carry=0; const sp=textSprite(name,17,{fg:'#2E3A45',depth:false}); sp.position.set((a[0]+b[0])/2,(a[1]+b[1])/2,3); ctxGroup.add(sp); nLab++;}}
+    let carry=6*MILE;
+    for(const r of rs) for(let i=1;i<r.pts.length&&nLab<80;i++){const a=r.pts[i-1],b=r.pts[i],L=Math.hypot(b[0]-a[0],b[1]-a[1]); carry+=L;
+      const x=(a[0]+b[0])/2, y=(a[1]+b[1])/2;
+      if(carry>=12*MILE&&!near(x,y,3*MILE)){carry=0; placed.push([x,y]); const sp=textSprite(name,13,{weight:600,fg:'#F3EBD8',depth:false,alpha:0.92}); sp.position.set(x,y,3); ctxGroup.add(sp); nLab++;}}
   }
   // towns
-  const rank={city:0,town:1,village:2,hamlet:3};
-  ctx.towns.slice().sort((a,b)=>(rank[a.kind]??4)-(rank[b.kind]??4)).slice(0,60).forEach(t=>{
-    const big=t.kind==='city'||t.kind==='town', sp=textSprite(t.name,big?28:20,{weight:big?700:500,fg:'#24394A',depth:false});
+  towns.forEach(t=>{
+    const big=t.kind==='city'||t.kind==='town', sp=textSprite(t.name,big?24:16,{weight:big?700:500,fg:'#FFFFFF',depth:false});
     sp.position.set(t.x,t.y,big?60:40); ctxGroup.add(sp);});
   ctxGroup.visible=ctxOn.checked;
   ctxNote.textContent=`${fmtInt(ctx.roads.length)} roads, ${fmtInt(ctx.towns.length)} places · © OpenStreetMap contributors`;
@@ -456,6 +473,6 @@ function setContext(ctx){
 try{ if(localStorage.getItem('wta-stacks-ctx')==='off') ctxOn.checked=false; }catch(e){}
 ctxOn.onchange=()=>{ctxGroup.visible=ctxOn.checked; try{localStorage.setItem('wta-stacks-ctx',ctxOn.checked?'on':'off');}catch(e){}};
 // for the page tests: how far the orbit point is from the selected stack's center line (scene units)
-window.__wtaStacks={orbitOffset:()=>selected?Math.hypot(controls.target.x-selected.cx,controls.target.y-selected.cy):null};
+window.__wtaStacks={pickedSlab:()=>paintedPick?detailRow:null,orbitOffset:()=>selected?Math.hypot(controls.target.x-selected.cx,controls.target.y-selected.cy):null};
 return { setContext, contextStatus(t){ ctxNote.textContent=t; } };
 }};
