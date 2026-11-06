@@ -5,7 +5,7 @@ window.WTAStacksViewer = { start(D) {
 const loadingEl=document.getElementById('loading');
 if(!window.THREE||!THREE.OrbitControls){loadingEl.textContent='The 3D library did not load.';return false;}
 const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
-const U=10, SLAB_FT=200, D2R=Math.PI/180;   // every slab is the same thickness, thick enough that stacks read at county zoom
+const U=10, SLAB_FT=500, D2R=Math.PI/180;   // every slab is the same thickness, thick enough that stacks read at county zoom
 const fmtInt=n=>n.toLocaleString('en-US');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const causes=D.causes, fields=D.fields;
@@ -205,7 +205,7 @@ function restyle(){
 
 // ---------- camera control ----------
 const ray=new THREE.Raycaster(), ndc=new THREE.Vector2(), groundPlane=new THREE.Plane(new THREE.Vector3(0,0,1),0);
-const MAXD=county.r*4, MIND=8;
+const MAXD=Math.max(county.r*4, maxN*SLAB_FT/U*1.25*3), MIND=8;   // far enough out to frame the tallest stack
 function setNDC(e){const r=renderer.domElement.getBoundingClientRect();ndc.set(((e.clientX-r.left)/r.width)*2-1,-((e.clientY-r.top)/r.height)*2+1);}
 function groundAt(e){setNDC(e);ray.setFromCamera(ndc,camera);const p=new THREE.Vector3();return ray.ray.intersectPlane(groundPlane,p)?p:null;}
 renderer.domElement.addEventListener('wheel',e=>{
@@ -244,7 +244,7 @@ function focusStack(s){
   // Frame the whole stack, top slab included, however tall it is.
   const side=Math.sqrt(s.area), h=s.top, P=62*D2R, tanH=Math.tan(20*D2R);
   const tall=h*Math.sin(P)+side*Math.cos(P), wide=side*1.2/Math.max(0.5,camera.aspect);
-  const d=Math.min(MAXD,Math.max(55,side*3,1.3*Math.max(tall,wide)/2/tanH));
+  const d=Math.min(MAXD,Math.max(55,side*3,1.45*Math.max(tall,wide)/2/tanH));
   flyTo(new THREE.Vector3(s.cx,s.cy,h*0.5),d,P);
 }
 function flyToRow(s,i){hoverRow=i;showSlab(s,i);const r=Math.sqrt(s.area)*0.9;flyTo(new THREE.Vector3(s.cx,s.cy,s.base[i]+s.t/2),Math.max(45,r*2.4,s.t*7),70*D2R,undefined,800);}
@@ -475,6 +475,6 @@ function setContext(ctx){
 try{ if(localStorage.getItem('wta-stacks-ctx')==='off') ctxOn.checked=false; }catch(e){}
 ctxOn.onchange=()=>{ctxGroup.visible=ctxOn.checked; try{localStorage.setItem('wta-stacks-ctx',ctxOn.checked?'on':'off');}catch(e){}};
 // for the page tests: how far the orbit point is from the selected stack's center line (scene units)
-window.__wtaStacks={pickedSlab:()=>paintedPick?detailRow:null,orbitOffset:()=>selected?Math.hypot(controls.target.x-selected.cx,controls.target.y-selected.cy):null};
+window.__wtaStacks={stackOnScreen:()=>{if(!selected)return null;const s=selected,y=z=>new THREE.Vector3(s.cx,s.cy,z).project(camera).y;return [y(0),y(s.top)];},pickedSlab:()=>paintedPick?detailRow:null,orbitOffset:()=>selected?Math.hypot(controls.target.x-selected.cx,controls.target.y-selected.cy):null};
 return { setContext, contextStatus(t){ ctxNote.textContent=t; } };
 }};
