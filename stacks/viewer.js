@@ -33,19 +33,32 @@ const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim
 const v2=p=>new THREE.Vector2(p[0],p[1]);
 
 let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
-const gpos=[],lpos=[];
+const gpos=[],lpos=[],hullPts=[];
 D.ground.forEach(polys=>polys.forEach(rings=>{
   if(!rings.length||rings[0].length<3) return;
   const contour=rings[0].map(v2), holes=rings.slice(1).filter(h=>h.length>=3).map(h=>h.map(v2));
   const pts=contour.concat(...holes);
   let tris=[]; try{tris=THREE.ShapeUtils.triangulateShape(contour,holes);}catch(e){}
   tris.forEach(t=>t.forEach(k=>gpos.push(pts[k].x,pts[k].y,0)));
+  rings[0].forEach(v=>hullPts.push(v));
   rings.forEach(r=>{for(let i=0;i<r.length;i++){const a=r[i],b=r[(i+1)%r.length];lpos.push(a[0],a[1],0.05,b[0],b[1],0.05);
     if(a[0]<minX)minX=a[0]; if(a[0]>maxX)maxX=a[0]; if(a[1]<minY)minY=a[1]; if(a[1]>maxY)maxY=a[1];}});
 }));
 if(!isFinite(minX)){minX=minY=-100;maxX=maxY=100;}
 const gGeo=new THREE.BufferGeometry(); gGeo.setAttribute('position',new THREE.Float32BufferAttribute(gpos,3));
 const gMat=new THREE.MeshBasicMaterial({color:0xe8dcc4}); scene.add(new THREE.Mesh(gGeo,gMat));
+// The parcel fabric's outline (convex hull) is filled a little darker than the parcels, so street gaps read as
+// streets, and it marks the stencil buffer so roads are drawn black inside it and light outside it.
+function hull(P){P=P.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]);const c=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);
+  const lo=[],up=[];for(const p of P){while(lo.length>1&&c(lo[lo.length-2],lo[lo.length-1],p)<=0)lo.pop();lo.push(p);}
+  for(let i=P.length-1;i>=0;i--){const p=P[i];while(up.length>1&&c(up[up.length-2],up[up.length-1],p)<=0)up.pop();up.push(p);}
+  return lo.slice(0,-1).concat(up.slice(0,-1));}
+const hullRing=hullPts.length>=3?hull(hullPts):[];
+if(hullRing.length>=3){
+  const hm=new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape(hullRing.map(v2))),new THREE.MeshBasicMaterial({color:0xCDBF9F,
+    stencilWrite:true,stencilRef:1,stencilFunc:THREE.AlwaysStencilFunc,stencilZPass:THREE.ReplaceStencilOp,depthWrite:false}));
+  hm.renderOrder=-1; scene.add(hm);   // drawn first and leaves no depth, so the parcels always paint over it
+}
 const lGeo=new THREE.BufferGeometry(); lGeo.setAttribute('position',new THREE.Float32BufferAttribute(lpos,3));
 const lMat=new THREE.LineBasicMaterial({color:0xb9a887}); scene.add(new THREE.LineSegments(lGeo,lMat));
 const county={cx:(minX+maxX)/2,cy:(minY+maxY)/2,r:Math.max(maxX-minX,maxY-minY,200)/2};
@@ -426,7 +439,7 @@ requestAnimationFrame(loop);
 const ctxGroup=new THREE.Group(); scene.add(ctxGroup);
 const ctxOn=document.getElementById('ctxOn'), ctxNote=document.getElementById('ctxNote');
 // Roads: a light center on a dark casing, so they read on both the dark surround and the sand parcels.
-const ROAD={local:{color:0xBDB5A6,w:1.6,z:0.2},fm:{color:0xE6DCC3,w:3,z:0.25},major:{color:0xF2C45A,w:5,z:0.3}}, CASING=0x1C1F22;
+const ROAD={local:{color:0xBDB5A6,w:1.6,z:0.2},fm:{color:0xE6DCC3,w:3,z:0.25},major:{color:0xF2C45A,w:5,z:0.3}}, CASING=0x1C1F22, ROAD_ON_PARCELS=0x000000;
 const pxScale=px=>px*2/(800*(1/Math.tan(20*D2R)));   // sprite scale for about px pixels tall on a typical screen
 function textSprite(text,px,{weight=700,fg='#F7F3EA',halo='rgba(22,25,28,.88)',depth=true,alpha=1}={}){
   const c=document.createElement('canvas'),g=c.getContext('2d'),fs=40,font=`${weight} ${fs}px Roboto, "Segoe UI", sans-serif`;
@@ -448,8 +461,15 @@ function setContext(ctx){
       ribbon(cas,a,b,L,st.w+3,st.z-0.05); ribbon(tri,a,b,L,st.w,st.z); seg.push(a[0],a[1],st.z+0.01,b[0],b[1],st.z+0.01);}});
     if(!seg.length) continue;
     const geo=arr=>{const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.Float32BufferAttribute(arr,3)); return g;};
-    ctxGroup.add(new THREE.Mesh(geo(cas),new THREE.MeshBasicMaterial({color:CASING,side:THREE.DoubleSide,transparent:true,opacity:0.7})),
-      new THREE.Mesh(geo(tri),new THREE.MeshBasicMaterial({color:st.color,side:THREE.DoubleSide})), new THREE.LineSegments(geo(seg),new THREE.LineBasicMaterial({color:st.color})));
+    // off the parcels: light center on a dark casing; on the parcels: solid black
+    const off={stencilWrite:true,stencilRef:1,stencilFunc:THREE.NotEqualStencilFunc}, on={stencilWrite:true,stencilRef:1,stencilFunc:THREE.EqualStencilFunc};
+    const keep={stencilFail:THREE.KeepStencilOp,stencilZFail:THREE.KeepStencilOp,stencilZPass:THREE.KeepStencilOp};
+    const add=o=>{o.renderOrder=1; ctxGroup.add(o);};
+    add(new THREE.Mesh(geo(cas),new THREE.MeshBasicMaterial({color:CASING,side:THREE.DoubleSide,transparent:true,opacity:0.7,...off,...keep})));
+    add(new THREE.Mesh(geo(tri),new THREE.MeshBasicMaterial({color:st.color,side:THREE.DoubleSide,...off,...keep})));
+    add(new THREE.LineSegments(geo(seg),new THREE.LineBasicMaterial({color:st.color,...off,...keep})));
+    add(new THREE.Mesh(geo(tri),new THREE.MeshBasicMaterial({color:ROAD_ON_PARCELS,side:THREE.DoubleSide,...on,...keep})));
+    add(new THREE.LineSegments(geo(seg),new THREE.LineBasicMaterial({color:ROAD_ON_PARCELS,...on,...keep})));
   }
   // road names: highways and farm roads only, about one label every 12 miles of road, and never two labels
   // within about 3 miles of each other or of a town name
