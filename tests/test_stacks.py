@@ -1,7 +1,8 @@
 import threading, functools, http.server, sys, subprocess, json, re, urllib.parse
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-# Usage: python test_stacks.py SITE_DIR OUT_DIR   (run_all.py passes both)
+# Usage: python test_stacks.py SITE_DIR OUT_DIR [py]   (run_all.py passes them)
+# With "py" the page runs the Python engine (?engine=py: wta-stacks in Pyodide) instead of engine.js.
 # Uses made-up "Caprock CAD" parcels from make_test_parcels.py: 64 rows, 6 planted stacks, 32 stacked rows.
 site=Path(sys.argv[1]).resolve(); out=Path(sys.argv[2]).resolve()
 d=str(out)+"/"; fx=out/"parcels"
@@ -10,7 +11,10 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self,*a): pass
 H=functools.partial(Quiet, directory=str(site))
 srv=http.server.ThreadingHTTPServer(("127.0.0.1",0),H); threading.Thread(target=srv.serve_forever,daemon=True).start()
-origin=f"http://127.0.0.1:{srv.server_address[1]}"; u=origin+"/stacks/"
+PY=len(sys.argv)>3 and sys.argv[3]=="py"
+origin=f"http://127.0.0.1:{srv.server_address[1]}"; u=origin+"/stacks/"+("?engine=py" if PY else "")
+county=lambda c: origin+(f"/stacks/?c={c}&engine=py" if PY else f"/stacks_{c}/")   # county pages forward to ?c=, without the engine switch
+d+= "py-" if PY else ""
 ok=True
 def check(l,c,x=""):
     global ok; ok&=bool(c); print(("PASS " if c else "FAIL ")+l+(f"  [{x}]" if x else ""))
@@ -32,11 +36,12 @@ with sync_playwright() as p:
     ctx.route(re.compile("overpass"), overpass)
     def open_file(name):
         pg.goto(u); pg.wait_for_timeout(300); pg.set_input_files("#file",str(fx/name))
-        pg.wait_for_selector("#setup:not([hidden]), #err:not(:empty)",timeout=20000)
+        pg.wait_for_selector("#setup:not([hidden]), #err:not(:empty)",timeout=60000)
     def build():
-        pg.click("#build"); pg.wait_for_selector("#viewerSec:not([hidden]), #err2:not(:empty)",timeout=30000); pg.wait_for_timeout(1200)
+        pg.click("#build"); pg.wait_for_selector("#viewerSec:not([hidden]), #err2:not(:empty)",timeout=60000); pg.wait_for_timeout(1200)
     def stats(): return " ".join(pg.inner_text("#stats").split())
     pg.goto(u); pg.wait_for_timeout(400); pg.screenshot(path=d+"stacks-pick.png")
+    if PY: check("the Python engine is the one running", pg.evaluate("WTAStacks.ready.then(a=>a.engine)")=="python")
     check("not listed for search engines", pg.get_attribute('meta[name="robots"]',"content")=="noindex")
     for name,kind in [("caprock.zip","Shapefile"),("caprock.geojson","GeoJSON"),("caprock.gpkg","GeoPackage")]:
         open_file(name)
@@ -100,21 +105,21 @@ with sync_playwright() as p:
     open_file("caprock.zip"); pg.check("#remember"); build()
     pg.goto(u); pg.wait_for_timeout(500)
     check("remembered file offered after reload", pg.is_visible("#last") and pg.text_content("#lastName")=="caprock.zip")
-    pg.click("#lastOpen"); pg.wait_for_selector("#setup:not([hidden])",timeout=20000); build()
+    pg.click("#lastOpen"); pg.wait_for_selector("#setup:not([hidden])",timeout=60000); build()
     check("remembered file reopens", stats().startswith("6 stacks"), stats())
     pg.goto(u); pg.wait_for_timeout(400); pg.click("#lastForget"); pg.wait_for_timeout(300); pg.reload(); pg.wait_for_timeout(500)
     check("forget clears it", not pg.is_visible("#last"))
     # County pages: /stacks_r/ keeps its own file and settings and opens straight into the 3D view.
-    pg.goto(origin+"/stacks_r/"); pg.wait_for_selector("#slotNote:not([hidden])",timeout=10000)
+    pg.goto(county("r")); pg.wait_for_selector("#slotNote:not([hidden])",timeout=10000)
     check("county page asks for its file the first time", pg.is_visible("#pick") and "?c=r" in pg.url)
-    pg.set_input_files("#file",str(fx/"caprock.zip")); pg.wait_for_selector("#setup:not([hidden])")
+    pg.set_input_files("#file",str(fx/"caprock.zip")); pg.wait_for_selector("#setup:not([hidden])",timeout=60000)
     check("county page keeps the file by default", pg.is_checked("#remember"))
     pg.fill("#sTitle","County R demo"); build()
-    pg.goto(origin+"/stacks_r/"); pg.wait_for_selector("#viewerSec:not([hidden])",timeout=30000); pg.wait_for_timeout(800)
+    pg.goto(county("r")); pg.wait_for_selector("#viewerSec:not([hidden])",timeout=60000); pg.wait_for_timeout(800)
     check("county page reopens straight into the 3D view", stats().startswith("6 stacks") and "County R demo" in pg.text_content("#viewerSec h2"), pg.text_content("#viewerSec h2"))
     pg.click("#another"); pg.wait_for_selector("#pick:not([hidden])",timeout=10000)
     check("Open another file still works on a county page", pg.is_visible("#drop"))
-    pg.goto(origin+"/stacks_g/"); pg.wait_for_selector("#slotNote:not([hidden])",timeout=10000); pg.wait_for_timeout(300)
+    pg.goto(county("g")); pg.wait_for_selector("#slotNote:not([hidden])",timeout=10000); pg.wait_for_timeout(300)
     check("the other county page keeps its own file", pg.is_visible("#pick") and not pg.is_visible("#viewerSec"))
     pg.goto(u); pg.wait_for_timeout(500)
     check("the plain page is unchanged", pg.is_visible("#pick") and not pg.is_visible("#slotNote") and not pg.is_visible("#last"))
@@ -123,8 +128,8 @@ with sync_playwright() as p:
     check("OpenStreetMap is asked only for a map area", osm_asks and "out:json" in sent and not any(w in sent for w in ["SMITH","PROP_ID","BLK"]), sent[:120])
     m=ctx.new_page(); m.set_viewport_size({"width":390,"height":844}); m.goto(u); m.wait_for_timeout(500)
     check("phone: pick page fits", m.evaluate("document.documentElement.scrollWidth<=390"))
-    m.set_input_files("#file",str(fx/"caprock.zip")); m.wait_for_selector("#setup:not([hidden])"); m.click("#build")
-    m.wait_for_selector("#viewerSec:not([hidden])",timeout=30000); m.wait_for_timeout(1200)
+    m.set_input_files("#file",str(fx/"caprock.zip")); m.wait_for_selector("#setup:not([hidden])",timeout=60000); m.click("#build")
+    m.wait_for_selector("#viewerSec:not([hidden])",timeout=60000); m.wait_for_timeout(1200)
     check("phone: viewer fits", m.evaluate("document.documentElement.scrollWidth<=390"), m.evaluate("document.documentElement.scrollWidth"))
     m.screenshot(path=d+"stacks-phone.png")
     check("no page errors", not errs, errs); b.close()
