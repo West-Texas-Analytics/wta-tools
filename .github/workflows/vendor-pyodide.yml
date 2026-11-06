@@ -1,0 +1,56 @@
+# Copies Pyodide (Python for the browser) and the packages Parcel Stacks needs
+# into stacks/py/pyodide/, so the page loads nothing from other sites.
+# Runs when stacks/py/pyodide/VERSION changes, or from the Actions tab.
+# Every wheel is checked against the sha256 in Pyodide's own lock file.
+name: Vendor Pyodide
+
+on:
+  push:
+    paths: ["stacks/py/pyodide/VERSION", ".github/workflows/vendor-pyodide.yml"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download
+        run: |
+          set -euo pipefail
+          V=$(cat stacks/py/pyodide/VERSION)
+          D=stacks/py/pyodide
+          BASE="https://cdn.jsdelivr.net/pyodide/v$V/full"
+          for f in pyodide.js pyodide.mjs pyodide.asm.js pyodide.asm.wasm python_stdlib.zip pyodide-lock.json; do
+            curl -fsSL "$BASE/$f" -o "$D/$f"
+          done
+          python3 - "$D" "$BASE" <<'PY'
+          import hashlib, json, sys, urllib.request
+          d, base = sys.argv[1], sys.argv[2]
+          lock = json.load(open(f"{d}/pyodide-lock.json"))
+          P = lock["packages"]
+          want, todo = set(), ["numpy", "shapely", "pyproj", "sqlite3"]
+          while todo:
+              n = todo.pop()
+              if n not in want:
+                  want.add(n)
+                  todo += P[n]["depends"]
+          for n in sorted(want):
+              fn = P[n]["file_name"]
+              data = urllib.request.urlopen(f"{base}/{fn}").read()
+              assert hashlib.sha256(data).hexdigest() == P[n]["sha256"], fn
+              open(f"{d}/{fn}", "wb").write(data)
+              print(n, fn, len(data))
+          PY
+          curl -fsSL "https://raw.githubusercontent.com/pyodide/pyodide/$V/LICENSE" -o "$D/LICENSE-pyodide.txt"
+          ls -la "$D"
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898299+github-actions[bot]@users.noreply.github.com"
+          git add stacks/py/pyodide
+          git diff --cached --quiet || git commit -m "Vendor Pyodide $(cat stacks/py/pyodide/VERSION) for Parcel Stacks"
+          git push
