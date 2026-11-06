@@ -52,6 +52,8 @@ with sync_playwright() as p:
     pg.click("#list button >> nth=0"); pg.wait_for_timeout(1500)
     check("roads and towns drawn", "1 roads, 1 places" in pg.text_content("#ctxNote"), pg.text_content("#ctxNote"))
     check("clicking the tallest stack shows its 22 rows", "22 rows on one footprint" in pg.text_content("#insp"))
+    yb,yt=pg.evaluate("window.__wtaStacks.stackOnScreen()")
+    check("the whole stack is on screen, top included", -1<yb<yt<1, (yb,yt))
     check("stack details sit in the left panel, hints sit below the view", pg.locator(".panel.left #insp").is_visible() and pg.locator("#view .hint").count()==0 and pg.locator(".below .hint").is_visible())
     pg.screenshot(path=d+"stacks-view.png")
     cv=pg.locator("#view canvas").bounding_box()
