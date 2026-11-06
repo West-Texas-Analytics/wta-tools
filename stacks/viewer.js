@@ -5,7 +5,7 @@ window.WTAStacksViewer = { start(D) {
 const loadingEl=document.getElementById('loading');
 if(!window.THREE||!THREE.OrbitControls){loadingEl.textContent='The 3D library did not load.';return false;}
 const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
-const U=10, SLAB_FT=500, D2R=Math.PI/180;   // every slab is the same thickness, thick enough that stacks read at county zoom
+const U=10, SLAB_FT=500, MAX_STACK_FT=10000, D2R=Math.PI/180;   // slabs are 500 ft; a stack taller than 10,000 ft is squeezed to fit (thinner slabs)
 const fmtInt=n=>n.toLocaleString('en-US');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const causes=D.causes, fields=D.fields;
@@ -108,7 +108,7 @@ const rowRange=()=>[posToN(+minN.value),posToN(+maxNs.value)];
 function showRange(){const [a,b]=rowRange(); document.getElementById('minNv').textContent=a; document.getElementById('maxNv').textContent=b;}
 showRange();
 let selected=null, hoverRow=null, detailRow=null;
-function slabT(){return SLAB_FT/U;}
+function slabT(s){return Math.min(SLAB_FT, MAX_STACK_FT/(s.n*1.25))/U;}
 function shapesOf(polys){return polys.filter(r=>r[0]&&r[0].length>=3).map(rings=>{const sh=new THREE.Shape(rings[0].map(v2));rings.slice(1).forEach(h=>sh.holes.push(new THREE.Path(h.map(v2))));return sh;});}
 function labelQuads(s,pos,uv){
   const t=s.t, edges=[];
@@ -205,7 +205,7 @@ function restyle(){
 
 // ---------- camera control ----------
 const ray=new THREE.Raycaster(), ndc=new THREE.Vector2(), groundPlane=new THREE.Plane(new THREE.Vector3(0,0,1),0);
-const MAXD=Math.max(county.r*4, maxN*SLAB_FT/U*1.25*3), MIND=8;   // far enough out to frame the tallest stack
+const MAXD=Math.max(county.r*4, MAX_STACK_FT/U*3), MIND=8;   // far enough out to frame the tallest stack
 function setNDC(e){const r=renderer.domElement.getBoundingClientRect();ndc.set(((e.clientX-r.left)/r.width)*2-1,-((e.clientY-r.top)/r.height)*2+1);}
 function groundAt(e){setNDC(e);ray.setFromCamera(ndc,camera);const p=new THREE.Vector3();return ray.ray.intersectPlane(groundPlane,p)?p:null;}
 renderer.domElement.addEventListener('wheel',e=>{
@@ -397,7 +397,7 @@ fFind.addEventListener('input',()=>{filtersChanged(); const q=fFind.value.trim()
 const sumRows=stacks.reduce((a,s)=>a+s.n,0);
 document.getElementById('facts').innerHTML=[[fmtInt(D.parcels),'parcels in the layer'],[fmtInt(stacks.length),'stacks (2+ rows, same shape)'],[fmtInt(sumRows),'rows sitting in stacks'],[fmtInt(stacks.filter(s=>s.exact).length),'stacks with byte-identical geometry']]
   .map(([b,t])=>`<div class="fact"><b>${b}</b><span>${t}</span></div>`).join('');
-document.getElementById('howText').textContent=`Every parcel in the file is drawn as the flat ground. Wherever two or more rows have the same shape, each row becomes a ${SLAB_FT} ft slab stacked on that footprint. Shapes were compared in ${D.detect_crs} after rounding to 0.01 ft and putting every ring in the same direction and starting corner.`;
+document.getElementById('howText').textContent=`Every parcel in the file is drawn as the flat ground. Wherever two or more rows have the same shape, each row becomes a ${SLAB_FT} ft slab stacked on that footprint. Stacks are capped at ${fmtInt(MAX_STACK_FT)} ft tall, so on a stack of more than ${Math.floor(MAX_STACK_FT/(SLAB_FT*1.25))} rows the slabs are thinner. Shapes were compared in ${D.detect_crs} after rounding to 0.01 ft and putting every ring in the same direction and starting corner.`;
 const big=stacks.slice().sort((a,b)=>b.n-a.n).slice(0,3);
 document.getElementById('bigfinding').textContent= big.length? `Tallest stacks: ${big.map(s=>`${s.n} rows on one ${s.acres} ac shape`).join(', ')}.`:'';
 const lim=[];
