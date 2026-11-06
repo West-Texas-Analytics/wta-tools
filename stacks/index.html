@@ -99,6 +99,12 @@
   .lbl { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-2); font-weight: 600; margin-bottom: 6px; display: block; }
   .app select, .app input[type=text] { width: 100%; font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--ground); color: var(--ink); }
   input[type=range] { width: 100%; accent-color: var(--sun); }
+  /* two thumbs on one track: the inputs overlap, only their thumbs take the pointer */
+  .dual { position: relative; height: 24px; }
+  .dual input[type=range] { position: absolute; inset: 0; margin: 0; background: none; pointer-events: none; }
+  .dual input[type=range]::-webkit-slider-thumb { pointer-events: auto; }
+  .dual input[type=range]::-moz-range-thumb { pointer-events: auto; }
+  .dual input + input::-webkit-slider-runnable-track { background: transparent; }
   .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 13px; }
   .legend { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; }
   .legend .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; margin-right: 7px; vertical-align: -1px; border: 1px solid rgba(0,0,0,.15); }
@@ -273,11 +279,10 @@
         <div class="sub" id="hSub"></div>
       </div>
       <div class="filters" role="group" aria-label="Filters">
-        <label><span>Likely cause</span><select id="fCause"></select></label>
+        <label><span>Owners</span><select id="fOwn"></select></label>
         <label><span>State code</span><select id="fUse"></select></label>
         <label class="grow"><span>Account or owner</span><input type="text" id="find" placeholder="Type 2+ letters" autocomplete="off"></label>
-        <div class="checks"><label class="check"><input type="checkbox" id="ctxOn" checked> Roads and towns</label>
-          <label class="check"><input type="checkbox" id="autoT" checked> Thicker on big tracts</label></div>
+        <div class="checks"><label class="check"><input type="checkbox" id="ctxOn" checked> Roads and towns</label></div>
       </div>
       <div class="acts">
         <button class="pbtn ghost" id="csv" type="button">Download stacked rows (CSV)</button>
@@ -293,8 +298,8 @@
           <div class="legend" id="legend" style="margin-top:8px"></div>
         </div>
         <div>
-          <label class="lbl" for="minN">Show stacks with at least <span id="minNv">2</span> rows</label>
-          <input type="range" id="minN" min="2" max="20" value="2">
+          <span class="lbl" id="rangeL">Show stacks with <span id="minNv">2</span> to <span id="maxNv">2</span> rows</span>
+          <div class="dual"><input type="range" id="minN" min="0" max="1000" value="0" aria-label="Fewest rows" aria-describedby="rangeL"><input type="range" id="maxN" min="0" max="1000" value="1000" aria-label="Most rows" aria-describedby="rangeL"></div>
         </div>
         <section class="insp-panel" id="insp" aria-label="Stacks and the selected stack" aria-live="polite"></section>
       </aside>
@@ -325,18 +330,6 @@
         <div class="facts" id="facts"></div>
         <p id="howText"></p>
         <p id="bigfinding"></p>
-      </section>
-      <section>
-        <h2>How “likely cause” is guessed</h2>
-        <ul>
-          <li><b>Blank owner and legal:</b> at least one row has neither.</li>
-          <li><b>Catch-all shape:</b> 20 or more rows on one footprint, which usually means a default polygon that unmapped accounts were pointed at.</li>
-          <li><b>Mineral interests, business personal property, mobile home, utility:</b> a row's state code starts with G, L, M or J. These often share land on purpose.</li>
-          <li><b>Duplicate account:</b> every row has the same owner and the same legal description.</li>
-          <li><b>Same legal, different owners:</b> often valid, such as undivided interests or heirs with their own accounts.</li>
-          <li><b>Different legals on one shape:</b> usually a split or a separate tract that was never drawn.</li>
-        </ul>
-        <p>Owners and legals are compared after removing spaces and punctuation. These are guesses to sort the review, not findings.</p>
       </section>
       <section>
         <h2>About this file</h2>

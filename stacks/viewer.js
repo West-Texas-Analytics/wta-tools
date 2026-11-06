@@ -5,7 +5,7 @@ window.WTAStacksViewer = { start(D) {
 const loadingEl=document.getElementById('loading');
 if(!window.THREE||!THREE.OrbitControls){loadingEl.textContent='The 3D library did not load.';return false;}
 const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
-const U=10, SLAB_FT=80, D2R=Math.PI/180;
+const U=10, SLAB_FT=200, D2R=Math.PI/180;   // every slab is the same thickness, thick enough that stacks read at county zoom
 const fmtInt=n=>n.toLocaleString('en-US');
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const causes=D.causes, fields=D.fields;
@@ -54,17 +54,16 @@ applyTheme();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',applyTheme);
 
 // ---------- color-by ----------
-const ramp=["#F1D9A8","#E3A869","#C9713E","#9C4528","#6B2618"];
+const ramp=["#E9B25F","#D98A3D","#C2602F","#9C4528","#6B2618"];   // starts darker than the sand ground so 2-row stacks still show
 const cats=["#4F7A8C","#D98A3D","#6E8B3D","#7A5C99","#C8553D","#2E6F8E","#B08D57","#5D6B78","#A3496B","#8C7A5B"];
 function rampColor(t){t=Math.max(0,Math.min(1,t));const k=t*(ramp.length-1),i=Math.floor(k),f=k-i;return new THREE.Color(ramp[i]).lerp(new THREE.Color(ramp[Math.min(i+1,ramp.length-1)]),f);}
 const maxN=Math.max(2,...stacks.map(s=>s.n));
 const colorBy=document.getElementById('colorBy');
-const builtins=[['cause','Likely cause'],['owner','Owners match?'],['size','Stack height (rows)'],['match','Exact or after cleanup']];
+const builtins=[['owner','Owners match?'],['size','Stack height (rows)'],['match','Exact or after cleanup']];
 colorBy.innerHTML=builtins.map(([v,t])=>`<option value="${v}">${t}</option>`).join('')+D.color_fields.map((f,i)=>`<option value="f${i}">${esc(f.key)} (each row)</option>`).join('');
 const GREY='#9AA0A6';
 function colorFor(s,r){
   const m=colorBy.value;
-  if(m==='cause') return new THREE.Color(causes[s.cause].color);
   if(m==='owner') return new THREE.Color(s.sameOwner?'#4F7A8C':'#D98A3D');
   if(m==='match') return new THREE.Color(s.exact?'#4F7A8C':'#D98A3D');
   if(m==='size') return rampColor(maxN>2?Math.log(s.n-1)/Math.log(maxN-1):0);
@@ -76,8 +75,7 @@ function legend(){
   const m=colorBy.value, el=document.getElementById('legend');
   const sw=(c,t)=>`<div><span class="sw" style="background:${c}"></span>${t}</div>`;
   const rampHtml=(a,b,note)=>`<div class="ramp" style="background:linear-gradient(90deg,${ramp.join(',')})"></div><div class="ramp-l"><span>${a}</span><span>${b}</span></div>${note?`<div class="note" style="margin:2px 0 0">${note}</div>`:''}`;
-  if(m==='cause') el.innerHTML=Object.entries(causes).filter(([k])=>stacks.some(s=>s.cause===k)).map(([k,c])=>sw(c.color,`${c.label} · ${c.kind==='bad'?'probable error':'often valid'} <span style="color:var(--ink-2)">(${stacks.filter(s=>s.cause===k).length})</span>`)).join('');
-  else if(m==='owner') el.innerHTML=sw('#4F7A8C','Same owner on every row')+sw('#D98A3D','Owners differ');
+  if(m==='owner') el.innerHTML=sw('#4F7A8C','Same owner on every row')+sw('#D98A3D','Owners differ');
   else if(m==='match') el.innerHTML=sw('#4F7A8C','Exact match (identical geometry)')+sw('#D98A3D','Matched after cleanup');
   else if(m==='size') el.innerHTML=rampHtml('2 rows',maxN+' rows','log scale');
   else{const f=D.color_fields[+m.slice(1)];
@@ -103,10 +101,14 @@ atlases.forEach(a=>a.tex.needsUpdate=true);
 
 // ---------- slabs: one merged mesh per stack ----------
 const slabGroup=new THREE.Group(); scene.add(slabGroup);
-const autoT=document.getElementById('autoT'), minN=document.getElementById('minN');
-minN.max=Math.max(3,Math.min(20,maxN));
+const minN=document.getElementById('minN'), maxNs=document.getElementById('maxN');
+// Row-count range: two thumbs on a log scale from 2 rows to the tallest stack, so small counts get room.
+const posToN=p=>maxN<=2?2:Math.round(2*Math.pow(maxN/2,p/1000)), nToPos=n=>maxN<=2?0:Math.round(1000*Math.log(n/2)/Math.log(maxN/2));
+const rowRange=()=>[posToN(+minN.value),posToN(+maxNs.value)];
+function showRange(){const [a,b]=rowRange(); document.getElementById('minNv').textContent=a; document.getElementById('maxNv').textContent=b;}
+showRange();
 let selected=null, hoverRow=null, detailRow=null;
-function slabT(s){const base=SLAB_FT/U; return autoT.checked? base*Math.min(4,Math.max(1,Math.sqrt(s.area)/14)) : base;}
+function slabT(){return SLAB_FT/U;}
 function shapesOf(polys){return polys.filter(r=>r[0]&&r[0].length>=3).map(rings=>{const sh=new THREE.Shape(rings[0].map(v2));rings.slice(1).forEach(h=>sh.holes.push(new THREE.Path(h.map(v2))));return sh;});}
 function labelQuads(s,pos,uv){
   const t=s.t, edges=[];
@@ -256,18 +258,18 @@ function renderInspector(){
     const vis=stacks.filter(s=>s.visible);
     insp.innerHTML=`<div class="row" style="margin-bottom:6px"><span class="lbl" style="margin:0">Stacks · ${fmtInt(vis.length)} shown</span>
         <span class="btns"><button class="btn" id="prev" title="Previous stack (P)">‹ Prev</button><button class="btn" id="next" title="Next stack (N)">Next ›</button></span></div>
-      <div class="stacklist" id="list">${vis.map(s=>`<button data-id="${s.id}"><span class="n">${s.n}</span><span class="t">${esc(causes[s.cause].label)} <small>· ${esc(s.short)}</small></span></button>`).join('')||'<div class="note">No stacks match the filters.</div>'}</div>
+      <div class="stacklist" id="list">${vis.map(s=>`<button data-id="${s.id}"><span class="n">${s.n}</span><span class="t">${esc(s.short||'(no legal)')}</span></button>`).join('')||'<div class="note">No stacks match the filters.</div>'}</div>
       <div class="note">Click a stack here or in the view to see its rows. Click a slab to see everything in that row.</div>`;
     insp.querySelectorAll('#list button').forEach(b=>b.onclick=()=>focusStack(stacks[+b.dataset.id]));
     insp.querySelector('#prev').onclick=()=>step(-1); insp.querySelector('#next').onclick=()=>step(1);
     return;
   }
-  const s=selected,c=causes[s.cause];
+  const s=selected;
   const differ=fields.filter(f=>new Set(s.rows.map(r=>String(r[f]??''))).size>1), same=fields.filter(f=>!differ.includes(f));
   const head=`<div class="card-row"><button class="btn" id="iAll">‹ All stacks</button>
       <span class="btns" style="margin-left:auto"><button class="btn" id="prev" title="Previous stack (P)">‹ Prev</button><button class="btn" id="next" title="Next stack (N)">Next ›</button></span></div>
     <div><h3 class="insp-h">${s.n} rows on one footprint</h3>
-      <div class="pills"><span class="pill ${c.kind}">${esc(c.label)}</span><span class="pill">${s.exact?'Exact match':'Matched after cleanup'}</span><span class="pill">${s.acres.toLocaleString('en-US')} ac shape</span></div></div>`;
+      <div class="pills"><span class="pill">${s.sameOwner?'Same owner on every row':'Owners differ'}</span><span class="pill">${s.exact?'Exact match':'Matched after cleanup'}</span><span class="pill">${s.acres.toLocaleString('en-US')} ac shape</span></div></div>`;
   let body;
   if(detailRow!=null){
     const i=detailRow, r=s.rows[i], rec=(s.recs||[])[i]||{}, cols=D.columns||[];
@@ -299,15 +301,15 @@ function renderInspector(){
   }
 }
 // ---------- filters (the bar above the view) ----------
-const fCause=document.getElementById('fCause'), fUse=document.getElementById('fUse'), fFind=document.getElementById('find');
+const fOwn=document.getElementById('fOwn'), fUse=document.getElementById('fUse'), fFind=document.getElementById('find');
 const useOf=r=>String(r['Land use']??'').trim().toUpperCase();
-fCause.innerHTML=`<option value="">All causes</option>`+Object.entries(causes).filter(([k])=>stacks.some(s=>s.cause===k)).map(([k,c])=>`<option value="${esc(k)}">${esc(c.label)}</option>`).join('')+`<option value="!bad">Probable errors only</option>`;
+fOwn.innerHTML=`<option value="">All stacks</option><option value="same">Same owner on every row</option><option value="diff">Owners differ</option>`;
 const uses=[...new Set(stacks.flatMap(s=>s.rows.map(useOf)).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'en',{numeric:true}));
 fUse.innerHTML=`<option value="">All state codes</option>`+uses.map(u=>`<option>${esc(u)}</option>`).join('');
 fUse.disabled=!uses.length; if(!uses.length) fUse.title='No state code / land use column in this file';
 function passes(s){
-  if(s.n<+minN.value) return false;
-  const c=fCause.value; if(c==='!bad'?causes[s.cause].kind!=='bad':c&&s.cause!==c) return false;
+  const [lo,hi]=rowRange(); if(s.n<lo||s.n>hi) return false;
+  const o=fOwn.value; if(o&&(o==='same')!==!!s.sameOwner) return false;
   const u=fUse.value; if(u&&!s.rows.some(r=>useOf(r)===u)) return false;
   const q=fFind.value.trim().toUpperCase(); if(q.length>=2&&!s.rows.some(r=>String(r.Account||'').toUpperCase().includes(q)||String(r.Owner||'').toUpperCase().includes(q))) return false;
   return true;
@@ -315,13 +317,13 @@ function passes(s){
 function filtersChanged(){applyVisibility();paintBeacons();if(selected&&!selected.visible)clearSel();else{renderList();if(!selected)renderInspector();}}
 // Reset: back to how the view looked when it was built.
 function resetView(){
-  minN.value=minN.min; document.getElementById('minNv').textContent=minN.value; fCause.value=''; fUse.value=''; fFind.value='';
+  minN.value=0; maxNs.value=1000; showRange(); fOwn.value=''; fUse.value=''; fFind.value='';
   applyVisibility(); paintBeacons(); clearSel(); fit();
 }
 function renderList(){
   const vis=stacks.filter(s=>s.visible);
-  const rows=vis.reduce((a,s)=>a+s.n,0), bad=vis.filter(s=>causes[s.cause].kind==='bad').length;
-  document.getElementById('stats').innerHTML=`<div><b>${fmtInt(vis.length)}</b>stacks</div><div><b>${fmtInt(rows)}</b>rows in stacks</div><div><b>${fmtInt(bad)}</b>probable errors</div><div><b>${fmtInt(D.parcels)}</b>parcels</div>`;
+  const rows=vis.reduce((a,s)=>a+s.n,0), tallest=vis.reduce((a,s)=>Math.max(a,s.n),0);
+  document.getElementById('stats').innerHTML=`<div><b>${fmtInt(vis.length)}</b>stacks</div><div><b>${fmtInt(rows)}</b>rows in stacks</div><div><b>${fmtInt(tallest)}</b>rows in the tallest stack</div><div><b>${fmtInt(D.parcels)}</b>parcels</div>`;
   if(!selected){const L=insp.querySelector('#list'); if(L) L.querySelectorAll('button').forEach(b=>b.classList.remove('on'));}
 }
 function step(dir){const vis=stacks.filter(s=>s.visible);if(!vis.length)return;let i=selected?vis.indexOf(selected):-1;i=(i+dir+vis.length)%vis.length;focusStack(vis[i]);}
@@ -386,18 +388,18 @@ document.getElementById('b3d').onclick=()=>{const a=sph();flyTo(controls.target.
 const north=()=>{const a=sph();flyTo(controls.target.clone(),a.d,a.phi,-Math.PI/2,600);};
 const comp=document.getElementById('compass'); comp.onclick=north; comp.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();north();}};
 colorBy.onchange=()=>{legend();stacks.forEach(paintStack);paintBeacons();};
-autoT.onchange=()=>{buildAll(); if(selected) renderInspector();};
-minN.oninput=()=>{document.getElementById('minNv').textContent=minN.value;filtersChanged();};
-fCause.onchange=filtersChanged; fUse.onchange=filtersChanged;
+minN.oninput=()=>{if(+minN.value>+maxNs.value) minN.value=maxNs.value; showRange(); filtersChanged();};
+maxNs.oninput=()=>{if(+maxNs.value<+minN.value) maxNs.value=minN.value; showRange(); filtersChanged();};
+fOwn.onchange=filtersChanged; fUse.onchange=filtersChanged;
 fFind.addEventListener('input',()=>{filtersChanged(); const q=fFind.value.trim(); if(q.length<3)return; const s=stacks.find(s=>s.visible); if(s&&s!==selected)focusStack(s);});
 
 // ---------- facts ----------
 const sumRows=stacks.reduce((a,s)=>a+s.n,0);
 document.getElementById('facts').innerHTML=[[fmtInt(D.parcels),'parcels in the layer'],[fmtInt(stacks.length),'stacks (2+ rows, same shape)'],[fmtInt(sumRows),'rows sitting in stacks'],[fmtInt(stacks.filter(s=>s.exact).length),'stacks with byte-identical geometry']]
   .map(([b,t])=>`<div class="fact"><b>${b}</b><span>${t}</span></div>`).join('');
-document.getElementById('howText').textContent=`Every parcel in the file is drawn as the flat ground. Wherever two or more rows have the same shape, each row becomes an 80 ft slab stacked on that footprint. Shapes were compared in ${D.detect_crs} after rounding to 0.01 ft and putting every ring in the same direction and starting corner.`;
-const big=stacks.filter(s=>s.cause==='dump');
-document.getElementById('bigfinding').textContent= big.length? `The tallest stacks stand out: ${big.slice(0,3).map(s=>`${s.n} rows on one ${s.acres} ac shape`).join(', ')}. Shapes like that are usually a placeholder polygon that unmapped accounts were attached to.`:'';
+document.getElementById('howText').textContent=`Every parcel in the file is drawn as the flat ground. Wherever two or more rows have the same shape, each row becomes a ${SLAB_FT} ft slab stacked on that footprint. Shapes were compared in ${D.detect_crs} after rounding to 0.01 ft and putting every ring in the same direction and starting corner.`;
+const big=stacks.slice().sort((a,b)=>b.n-a.n).slice(0,3);
+document.getElementById('bigfinding').textContent= big.length? `Tallest stacks: ${big.map(s=>`${s.n} rows on one ${s.acres} ac shape`).join(', ')}.`:'';
 const lim=[];
 if(D.missing_roles.length) lim.push(`No column was found for: ${D.missing_roles.join(', ')}. Those can't be shown or used for coloring. If the file has them under another name, pick them under Columns and build again.`);
 if(D.empty_roles&&D.empty_roles.length) lim.push(`These columns are in the file but empty or zero on every row: ${D.empty_roles.join(', ')}.`);
