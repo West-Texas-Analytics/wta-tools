@@ -448,6 +448,54 @@ function sceneRings(polys, cx, cy, simplify) {
   }));
 }
 
+// ---------------------------------------------------------------- roads and towns (OpenStreetMap)
+/** [south, west, north, east] in degrees around the parcels, from their extent in the detection CRS. */
+function llBox(detect, minx, miny, maxx, maxy) {
+  const proj4 = dep('proj4'), tr = proj4(KNOWN[detect].def, KNOWN['EPSG:4326'].def);
+  const c = [[minx, miny], [minx, maxy], [maxx, miny], [maxx, maxy]].map(p => tr.forward(p));
+  const r = v => Math.round(v * 1e4) / 1e4, pad = 0.01;
+  return [r(Math.min(...c.map(p => p[1])) - pad), r(Math.min(...c.map(p => p[0])) - pad), r(Math.max(...c.map(p => p[1])) + pad), r(Math.max(...c.map(p => p[0])) + pad)];
+}
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
+const ROAD_CLASS = { motorway: 'major', trunk: 'major', primary: 'major', motorway_link: 'major', trunk_link: 'major', primary_link: 'major',
+  secondary: 'fm', secondary_link: 'fm', tertiary: 'fm', unclassified: 'local', residential: 'local' };
+function overpassQuery(b) {
+  const box = b.join(',');
+  return `[out:json][timeout:90];(way["highway"~"^(${Object.keys(ROAD_CLASS).join('|')})$"](${box});node["place"~"^(city|town|village|hamlet)$"](${box}););out geom;`;
+}
+/** Ask OpenStreetMap (Overpass API) for roads and place names in the box. Only the box is sent. */
+async function fetchOsm(bbox, fetchFn) {
+  const f = fetchFn || dep('fetch').bind(root), q = overpassQuery(bbox);
+  let last;
+  for (const url of OVERPASS) {
+    try {
+      const r = await f(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(q) });
+      if (!r.ok) throw new Error(`${new URL(url).host} answered ${r.status}`);
+      const j = await r.json();
+      if (!j || !Array.isArray(j.elements)) throw new Error('unexpected answer');
+      return j;
+    } catch (e) { last = e; }
+  }
+  throw last || new Error('no answer');
+}
+/** OpenStreetMap JSON → {roads:[{cls, label, pts}], towns:[{name, kind, x, y}]} in the viewer's scene units. */
+function contextFromOsm(osm, view) {
+  const proj4 = dep('proj4'), tr = proj4(KNOWN['EPSG:4326'].def, KNOWN[view.detect_crs].def), [ox, oy] = view.origin_ft;
+  const sc = (lon, lat) => { const q = tr.forward([lon, lat]); return [r1((q[0] - ox) / SCENE_FT), r1((q[1] - oy) / SCENE_FT)]; };
+  const roads = [], towns = [];
+  for (const el of osm.elements || []) {
+    const t = el.tags || {};
+    if (el.type === 'way' && Array.isArray(el.geometry) && ROAD_CLASS[t.highway]) {
+      const pts = el.geometry.filter(g => g && isFinite(g.lat) && isFinite(g.lon)).map(g => sc(g.lon, g.lat));
+      if (pts.length >= 2) roads.push({ cls: ROAD_CLASS[t.highway], label: (t.ref || t.name || '').split(';')[0].trim(), pts });
+    } else if (el.type === 'node' && t.name && isFinite(el.lat)) {
+      const [x, y] = sc(el.lon, el.lat);
+      towns.push({ name: t.name, kind: t.place, x, y });
+    }
+  }
+  return { roads, towns, source: 'OpenStreetMap' };
+}
+
 // ---------------------------------------------------------------- build
 function naturalCmp(a, b) {
   const ta = String(a).split(/(\d+)/).filter(Boolean), tb = String(b).split(/(\d+)/).filter(Boolean);
@@ -541,6 +589,8 @@ async function build(layer, opts) {
     fields, causes: CAUSES,
     color_fields: colorFields(stacked, roles, extra),
     extent_ft: [Math.round(maxx - minx), Math.round(maxy - miny)],
+    origin_ft: [cx, cy],
+    bbox_ll: llBox(detect, minx, miny, maxx, maxy),
     ground, stacks: outStacks,
   };
   return { view, stackRows };
@@ -553,7 +603,7 @@ function stacksCsv(stackRows) {
   return [cols.join(','), ...stackRows.map(r => cols.map(c => cell(r[c])).join(','))].join('\n') + '\n';
 }
 
-const api = { deps, KNOWN, ZONES, DEFAULT_DETECT, CANDIDATES, LABELS, CAUSES, openFiles, resolveCrs, guessRoles, likelyCause, shapeKey, findStacks, build, stacksCsv };
+const api = { deps, KNOWN, ZONES, DEFAULT_DETECT, CANDIDATES, LABELS, CAUSES, openFiles, resolveCrs, guessRoles, fetchOsm, contextFromOsm, overpassQuery, likelyCause, shapeKey, findStacks, build, stacksCsv };
 root.WTAStacks = api;
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

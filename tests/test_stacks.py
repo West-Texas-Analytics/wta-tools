@@ -1,4 +1,4 @@
-import threading, functools, http.server, sys, subprocess
+import threading, functools, http.server, sys, subprocess, json, re, urllib.parse
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 # Usage: python test_stacks.py SITE_DIR OUT_DIR   (run_all.py passes both)
@@ -14,13 +14,22 @@ origin=f"http://127.0.0.1:{srv.server_address[1]}"; u=origin+"/stacks/"
 ok=True
 def check(l,c,x=""):
     global ok; ok&=bool(c); print(("PASS " if c else "FAIL ")+l+(f"  [{x}]" if x else ""))
+ROAD=[(31.27,-100.05),(31.27,-100.0)]; TOWN=(31.275,-100.03)   # near the made-up parcels (Texas Central, x 2.3M ft)
 CAUSES=["Catch-all shape","Duplicate account","Same legal, different owners","Different legals on one shape","Mineral interests","Blank owner and legal"]
 with sync_playwright() as p:
     b=p.chromium.launch(args=["--use-gl=swiftshader","--enable-unsafe-swiftshader"])
     ctx=b.new_context(viewport={"width":1440,"height":950},accept_downloads=True)
     pg=ctx.new_page(); errs=[]; other=[]
     pg.on("pageerror",lambda e:errs.append(str(e)))
-    pg.on("request",lambda r:None if r.url.startswith(origin) or "fonts.g" in r.url else other.append(r.url))
+    pg.on("request",lambda r:None if r.url.startswith(origin) or "fonts.g" in r.url or "overpass" in r.url else other.append(r.url))
+    # Roads and towns: answer the OpenStreetMap (Overpass) request with a stand-in road and town near the made-up parcels.
+    osm_asks=[]
+    def overpass(route):
+        osm_asks.append(route.request.post_data or "")
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"elements":[
+            {"type":"way","id":1,"tags":{"highway":"secondary","ref":"FM 9999"},"geometry":[{"lat":lat,"lon":lon} for lat,lon in ROAD]},
+            {"type":"node","id":2,"lat":TOWN[0],"lon":TOWN[1],"tags":{"place":"town","name":"Caprock"}}]}))
+    ctx.route(re.compile("overpass"), overpass)
     def open_file(name):
         pg.goto(u); pg.wait_for_timeout(300); pg.set_input_files("#file",str(fx/name))
         pg.wait_for_selector("#setup:not([hidden]), #err:not(:empty)",timeout=20000)
@@ -42,6 +51,7 @@ with sync_playwright() as p:
         check(f"{name}: every planted cause found", all(c in leg for c in CAUSES), leg)
     check("one-layer pick hidden for a GeoPackage with a point layer too", pg.locator("#sLayer").is_hidden())
     pg.click("#list button >> nth=0"); pg.wait_for_timeout(1500)
+    check("roads and towns drawn", "1 roads, 1 places" in pg.text_content("#ctxNote"), pg.text_content("#ctxNote"))
     check("clicking the tallest stack shows its 22 rows", "22 rows on one footprint" in pg.text_content("#insp"))
     pg.screenshot(path=d+"stacks-view.png")
     with pg.expect_download() as dl: pg.click("#csv")
@@ -61,7 +71,9 @@ with sync_playwright() as p:
     check("remembered file reopens", stats().startswith("6 stacks"), stats())
     pg.goto(u); pg.wait_for_timeout(400); pg.click("#lastForget"); pg.wait_for_timeout(300); pg.reload(); pg.wait_for_timeout(500)
     check("forget clears it", not pg.is_visible("#last"))
-    check("file never leaves the page (no requests but fonts)", not other, other[:3])
+    check("file never leaves the page (only fonts and the OpenStreetMap map-area request)", not other, other[:3])
+    sent=urllib.parse.unquote_plus(" ".join(osm_asks))
+    check("OpenStreetMap is asked only for a map area", osm_asks and "out:json" in sent and not any(w in sent for w in ["SMITH","PROP_ID","BLK"]), sent[:120])
     m=ctx.new_page(); m.set_viewport_size({"width":390,"height":844}); m.goto(u); m.wait_for_timeout(500)
     check("phone: pick page fits", m.evaluate("document.documentElement.scrollWidth<=390"))
     m.set_input_files("#file",str(fx/"caprock.zip")); m.wait_for_selector("#setup:not([hidden])"); m.click("#build")
