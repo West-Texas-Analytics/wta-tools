@@ -26,6 +26,7 @@ with tempfile.TemporaryDirectory() as tmp:
         ("Tax Code Search", ["test_tax_code.py", site, pdf25, pdf24, out]),
         ("Tax Calendar", ["test_tax_calendar.py", site, out]),
         ("Property Categories", ["test_categories.py", site, out]),
+        ("Parcel Stacks", ["test_stacks.py", site, out]),
     ]
     if args.pdf:
         runs.append(("Tax Code Search, real PDF", ["test_tax_code_clear.py", site, Path(args.pdf).resolve()]))

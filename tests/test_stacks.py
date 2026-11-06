@@ -1,0 +1,73 @@
+import threading, functools, http.server, sys, subprocess
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+# Usage: python test_stacks.py SITE_DIR OUT_DIR   (run_all.py passes both)
+# Uses made-up "Caprock CAD" parcels from make_test_parcels.py: 64 rows, 6 planted stacks, 32 stacked rows.
+site=Path(sys.argv[1]).resolve(); out=Path(sys.argv[2]).resolve()
+d=str(out)+"/"; fx=out/"parcels"
+subprocess.run([sys.executable,str(Path(__file__).with_name("make_test_parcels.py")),str(fx)],check=True)
+class Quiet(http.server.SimpleHTTPRequestHandler):
+    def log_message(self,*a): pass
+H=functools.partial(Quiet, directory=str(site))
+srv=http.server.ThreadingHTTPServer(("127.0.0.1",0),H); threading.Thread(target=srv.serve_forever,daemon=True).start()
+origin=f"http://127.0.0.1:{srv.server_address[1]}"; u=origin+"/stacks/"
+ok=True
+def check(l,c,x=""):
+    global ok; ok&=bool(c); print(("PASS " if c else "FAIL ")+l+(f"  [{x}]" if x else ""))
+CAUSES=["Catch-all shape","Duplicate account","Same legal, different owners","Different legals on one shape","Mineral interests","Blank owner and legal"]
+with sync_playwright() as p:
+    b=p.chromium.launch(args=["--use-gl=swiftshader","--enable-unsafe-swiftshader"])
+    ctx=b.new_context(viewport={"width":1440,"height":950},accept_downloads=True)
+    pg=ctx.new_page(); errs=[]; other=[]
+    pg.on("pageerror",lambda e:errs.append(str(e)))
+    pg.on("request",lambda r:None if r.url.startswith(origin) or "fonts.g" in r.url else other.append(r.url))
+    def open_file(name):
+        pg.goto(u); pg.wait_for_timeout(300); pg.set_input_files("#file",str(fx/name))
+        pg.wait_for_selector("#setup:not([hidden]), #err:not(:empty)",timeout=20000)
+    def build():
+        pg.click("#build"); pg.wait_for_selector("#viewerSec:not([hidden]), #err2:not(:empty)",timeout=30000); pg.wait_for_timeout(1200)
+    def stats(): return " ".join(pg.inner_text("#stats").split())
+    pg.goto(u); pg.wait_for_timeout(400); pg.screenshot(path=d+"stacks-pick.png")
+    check("not listed for search engines", pg.get_attribute('meta[name="robots"]',"content")=="noindex")
+    for name,kind in [("caprock.zip","Shapefile"),("caprock.geojson","GeoJSON"),("caprock.gpkg","GeoPackage")]:
+        open_file(name)
+        check(f"{name}: opens as {kind}", pg.is_visible("#setup") and kind in pg.text_content("#sFacts"), pg.text_content("#sFacts") or pg.text_content("#err"))
+        check(f"{name}: coordinates from the file", "(from the file)" in pg.eval_on_selector("#sCrs","s=>s.options[s.selectedIndex].text"))
+        picks={r:pg.input_value(f"#r_{r}") for r in ["account","owner","legal","land_use","market_value"]}
+        check(f"{name}: columns recognised", picks=={"account":"PROP_ID","owner":"OWNER_NAME","legal":"LEGAL_DESC","land_use":"STATE_CD","market_value":"MKT_VALUE"}, picks)
+        if name=="caprock.zip": pg.screenshot(path=d+"stacks-setup.png",full_page=True)
+        build()
+        check(f"{name}: 6 stacks, 32 rows, 64 parcels", stats().startswith("6 stacks 32 rows in stacks") and "64 parcels" in stats(), stats())
+        leg=pg.text_content("#legend")
+        check(f"{name}: every planted cause found", all(c in leg for c in CAUSES), leg)
+    check("one-layer pick hidden for a GeoPackage with a point layer too", pg.locator("#sLayer").is_hidden())
+    pg.click("#list button >> nth=0"); pg.wait_for_timeout(1500)
+    check("clicking the tallest stack shows its 22 rows", "22 rows on one footprint" in pg.text_content("#insp"))
+    pg.screenshot(path=d+"stacks-view.png")
+    with pg.expect_download() as dl: pg.click("#csv")
+    csv=Path(dl.value.path()).read_text().strip().splitlines()
+    check("CSV has a header and 32 rows", len(csv)==33 and csv[0].startswith("stack,rows_in_stack,likely_cause"), len(csv))
+    open_file("caprock_noprj.zip")
+    check("shapefile without .prj asks for coordinates", "Not in the file" in pg.eval_on_selector("#sCrs","s=>s.options[s.selectedIndex].text"))
+    build(); check("building without coordinates explains why", "Pick the coordinate system" in pg.text_content("#err2"))
+    pg.select_option("#sCrs","EPSG:2277"); build()
+    check("…and builds once Texas Central is picked", stats().startswith("6 stacks 32 rows"), stats())
+    open_file("fgdb.zip")
+    check("file geodatabase gets a clear message", "file geodatabase" in pg.text_content("#err"), pg.text_content("#err"))
+    open_file("caprock.zip"); pg.check("#remember"); build()
+    pg.goto(u); pg.wait_for_timeout(500)
+    check("remembered file offered after reload", pg.is_visible("#last") and pg.text_content("#lastName")=="caprock.zip")
+    pg.click("#lastOpen"); pg.wait_for_selector("#setup:not([hidden])",timeout=20000); build()
+    check("remembered file reopens", stats().startswith("6 stacks"), stats())
+    pg.goto(u); pg.wait_for_timeout(400); pg.click("#lastForget"); pg.wait_for_timeout(300); pg.reload(); pg.wait_for_timeout(500)
+    check("forget clears it", not pg.is_visible("#last"))
+    check("file never leaves the page (no requests but fonts)", not other, other[:3])
+    m=ctx.new_page(); m.set_viewport_size({"width":390,"height":844}); m.goto(u); m.wait_for_timeout(500)
+    check("phone: pick page fits", m.evaluate("document.documentElement.scrollWidth<=390"))
+    m.set_input_files("#file",str(fx/"caprock.zip")); m.wait_for_selector("#setup:not([hidden])"); m.click("#build")
+    m.wait_for_selector("#viewerSec:not([hidden])",timeout=30000); m.wait_for_timeout(1200)
+    check("phone: viewer fits", m.evaluate("document.documentElement.scrollWidth<=390"), m.evaluate("document.documentElement.scrollWidth"))
+    m.screenshot(path=d+"stacks-phone.png")
+    check("no page errors", not errs, errs); b.close()
+print("ALL PASS" if ok else "SOME FAILED")
+sys.exit(0 if ok else 1)
