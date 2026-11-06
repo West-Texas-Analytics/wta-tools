@@ -15,6 +15,7 @@ python tests/run_all.py --pdf ~/Downloads/96-297-25.pdf  # also runs the test th
 | `test_tax_code_clear.py` | Tax Code Search with the real PDF: clearing a search returns to page 1; typing while browsing keeps your place. |
 | `test_tax_calendar.py` | Tax Calendar: weekend and holiday rollover (including Dec. 31 into January), leap years, even-year entries, audience and key-date filters, Tax Code and Comptroller form links, search by form number, `.ics` export and line folding, the wheel view, phone layout. |
 | `test_categories.py` | Property Categories: search ranking for plain-English descriptions, code lookups, cross-links between categories, filters, deep links (`#J3`), phone layout. |
+| `test_stacks.py` | Parcel Stacks: opening a zipped shapefile, GeoJSON and GeoPackage; column guesses; the six planted stacks and their likely causes; a shapefile with no `.prj`; a file geodatabase turned away; CSV download; remembering and forgetting a file; no requests leave the page; phone layout. Uses made-up Caprock CAD parcels from `make_test_parcels.py`. |
 
 Run them after any change to a tool, and add a check when you fix a bug. Screenshots are written to `tests/.out/`.
 

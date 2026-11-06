@@ -8,6 +8,7 @@ Free tools from West Texas Analytics, LLC, published at **https://tools.westtexa
 | `/tax-code/` | Property Tax Code Search: visitors open the Comptroller's PDF in their own browser and search it. Nothing is uploaded. |
 | `/tax-calendar/` | Texas Property Tax Calendar: statutory deadlines for any year, rolled to the next business day for weekends and holidays (§ 1.06), with audience filters and .ics export. Two views: a list, and a wheel of the tax year (phases as wedges, key dates as notches; `?view=wheel`). |
 | `/categories/` | State Property Categories: searchable state property category codes with descriptions, examples and edge cases. |
+| `/stacks/` | Parcel Stacks (unlisted, `noindex`): open a district's parcel file (zipped shapefile, GeoPackage or GeoJSON) and see every parcel as ground with same-shape rows stacked as 3D slabs. The file is read in the browser and never uploaded. Browser port of `wta-stacks` in wta-shell (`plugins/stacks`); keep the stack rule, causes and column names in step with it. Libraries are vendored in `stacks/vendor/`. |
 
 Section numbers in the calendar and category lookup link into the Tax Code Search with `/tax-code/#q=Sec.%2041.44`, which opens the PDF at that section.
 
