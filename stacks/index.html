@@ -346,7 +346,10 @@
 <script src="vendor/proj4.js"></script>
 <script src="vendor/fflate.min.js"></script>
 <script src="vendor/sql-wasm.js"></script>
-<script src="engine.js"></script>
+<script>
+// Test switch: ?engine=py runs the Python engine (wta-stacks via Pyodide, py/) instead of engine.js.
+document.write('<script src="' + (/[?&]engine=py(&|$)/.test(location.search) ? 'engine-py.js' : 'engine.js') + '"><\/script>');
+</script>
 <script src="viewer.js"></script>
 <script>
 (function () {
