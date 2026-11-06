@@ -93,10 +93,9 @@
   .vtop .acts { display: flex; gap: 8px; flex-wrap: wrap; }
   /* Viewing: use the whole window width, and fill the window height below the title row. */
   body.viewing main { max-width: none; padding-top: 14px; }
-  .app { display: grid; grid-template-columns: 260px minmax(0, 1fr) 340px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); height: max(560px, calc(100vh - 175px)); }
+  .app { display: grid; grid-template-columns: 260px minmax(0, 1fr); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--paper); height: max(560px, calc(100vh - 175px)); }
   .panel { padding: 14px; overflow: auto; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
   .panel.left { border-right: 1px solid var(--line); }
-  .panel.right { border-left: 1px solid var(--line); }
   .lbl { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-2); font-weight: 600; margin-bottom: 6px; display: block; }
   .app select, .app input[type=text] { width: 100%; font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--ground); color: var(--ink); }
   input[type=range] { width: 100%; accent-color: var(--sun); }
@@ -129,9 +128,21 @@
   .hint kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; background: var(--ground); }
   .tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--paper); font-size: 12px; padding: 5px 8px; border-radius: 4px; white-space: nowrap; transform: translate(12px, 12px); }
   .scale { position: absolute; left: 10px; top: 10px; font-size: 11px; color: var(--ink-2); background: color-mix(in srgb, var(--paper) 88%, transparent); padding: 4px 8px; border-radius: 4px; font-variant-numeric: tabular-nums; }
+  .card3d { position: absolute; z-index: 4; left: 10px; top: 40px; width: min(420px, calc(100% - 140px)); max-height: calc(100% - 120px); overflow: auto; transform-origin: 50% 0; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 22px rgba(26,42,55,.22); padding: 12px 14px; font-size: 12.5px; display: grid; gap: 10px; }
+  .card-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .card-h b { font: 700 15px/1.2 var(--display); }
+  .card-sub { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .card-x { padding: 2px 8px; }
+  .kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 3px 12px; margin: 0; }
+  .kv dt { color: var(--ink-2); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; padding-top: 1px; }
+  .kv dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+  .kv dd.diff { background: var(--sun-soft); font-weight: 600; border-radius: 3px; padding: 0 4px; margin-left: -4px; }
+  .card-more summary { font-size: 12.5px; margin-bottom: 6px; }
+  .card-nav { display: flex; gap: 6px; }
+  .card-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .box-body { display: grid; gap: 10px; min-width: 0; }
+  .card-nav .btn[disabled] { opacity: .45; cursor: default; }
   .loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-2); font-size: 13px; pointer-events: none; }
-  .insp-empty { color: var(--ink-2); font-size: 13px; }
-  .insp h3 { font-size: 16px; margin: 0; }
   .pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
   .pill { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); }
   .pill.bad { color: var(--bad); border-color: var(--bad); }
@@ -159,7 +170,6 @@
   @media (max-width: 1100px) {
     .app { grid-template-columns: 240px minmax(0, 1fr); height: auto; }
     .view { height: max(480px, calc(100vh - 175px)); }
-    .panel.right { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
     .panel.left { max-height: max(480px, calc(100vh - 175px)); }
   }
   @media (max-width: 720px) {
@@ -169,6 +179,7 @@
     .panel.left { border-right: 0; border-top: 1px solid var(--line); max-height: none; }
     .tools .btn { min-width: 0; font-size: 11.5px; padding: 4px 8px; }
     .hint { display: none; }
+    .card3d { width: calc(100% - 20px); top: 36px; max-height: calc(100% - 46px); }
     .facts { grid-template-columns: 1fr 1fr; }
     .form { grid-template-columns: 1fr; }
     .form .hintv { grid-column: 1; }
@@ -291,7 +302,7 @@
         <div class="loading" id="loading">Building the parcel layer…</div>
         <div class="scale" id="scale"></div>
         <div class="tools">
-          <button class="btn" id="bFit" title="Whole county (Home)">⌂ Whole county</button>
+          <button class="btn" id="bFit" title="Back to the starting view (Home)">↺ Reset view</button>
           <button class="btn" id="b2d" title="Look straight down (T)">▢ Top down</button>
           <button class="btn" id="b3d" title="Tilted view (T)">◢ Tilted 3D</button>
         </div>
@@ -299,12 +310,12 @@
           <svg viewBox="0 0 54 54"><g id="needle" transform="rotate(0 27 27)"><polygon points="27,7 32,27 22,27" fill="var(--bad)"/><polygon points="27,47 32,27 22,27" fill="var(--ink-2)"/><text x="27" y="6.5" text-anchor="middle" font-size="7" font-family="Roboto, sans-serif" fill="var(--ink)" font-weight="700">N</text></g></svg>
         </div>
         <div class="hint">
-          <kbd>Drag</kbd> orbit · <kbd>Right-drag</kbd> or <kbd>Shift+drag</kbd> pan · <kbd>Scroll</kbd> zoom to cursor<br>
-          <kbd>Click</kbd> a stack to fly there · click a table row to fly to that slab · <kbd>N</kbd>/<kbd>P</kbd> next/prev · <kbd>Q</kbd>/<kbd>E</kbd> rotate · <kbd>Esc</kbd> or click empty ground to clear
+          <kbd>Drag</kbd> orbit · <kbd>Right-drag</kbd> or <kbd>Shift+drag</kbd> pan · <kbd>Scroll</kbd> zoom (on the stack when one is open)<br>
+          <kbd>Click</kbd> a slab to open its data · <kbd>Home</kbd> reset · <kbd>N</kbd>/<kbd>P</kbd> next/prev · <kbd>Q</kbd>/<kbd>E</kbd> rotate · <kbd>Esc</kbd> or click empty ground to clear
         </div>
         <div class="tip" id="tip" hidden></div>
+        <aside class="card3d" id="insp" aria-label="Selected stack" hidden></aside>
       </div>
-      <aside class="panel right" id="insp"></aside>
     </div>
     <div class="plan">
       <section>

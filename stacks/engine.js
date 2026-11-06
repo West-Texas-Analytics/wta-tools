@@ -566,9 +566,10 @@ async function build(layer, opts) {
     const g = geomsFt[st.rows[0]];
     const roleRows = st.rows.map(i => { const o = {}; for (const [role, col] of Object.entries(roles)) o[role] = layer.records[i][col] ?? null; return o; });
     const cause = likelyCause(roleRows);
-    const rows = st.rows.map(tableRow).sort((a, b) => naturalCmp(a.Account, b.Account));
+    const order = st.rows.map(i => [i, tableRow(i)]).sort((a, b) => naturalCmp(a[1].Account, b[1].Account));
+    const rows = order.map(o => o[1]), recs = order.map(o => layer.records[o[0]]);
     const [ccx, ccy] = centroid(g), acres = Math.round(polysArea(g) / 43560 * 100) / 100;
-    outStacks.push({ polys: sceneRings(g, cx, cy, 0), acres, exact: st.exact, cause, cx: r1((ccx - cx) / SCENE_FT), cy: r1((ccy - cy) / SCENE_FT), rows });
+    outStacks.push({ polys: sceneRings(g, cx, cy, 0), acres, exact: st.exact, cause, cx: r1((ccx - cx) / SCENE_FT), cy: r1((ccy - cy) / SCENE_FT), rows, recs });
     for (const r of rows) stackRows.push({ stack: n + 1, rows_in_stack: rows.length, likely_cause: CAUSES[cause].label, exact_match: st.exact ? 'yes' : 'no', shape_acres: acres, ...r });
   });
   progress('Drawing the ground layer…'); await yieldUI();
@@ -586,7 +587,7 @@ async function build(layer, opts) {
     detect_crs: detect,
     missing_roles: Object.keys(LABELS).filter(r => !roles[r]).map(r => LABELS[r]),
     empty_roles: Object.entries(roles).filter(([, col]) => layer.records.every(rec => rec[col] == null || rec[col] === '' || rec[col] === 0)).map(([r]) => LABELS[r]),
-    fields, causes: CAUSES,
+    fields, columns: layer.columns, causes: CAUSES,
     color_fields: colorFields(stacked, roles, extra),
     extent_ft: [Math.round(maxx - minx), Math.round(maxy - miny)],
     origin_ft: [cx, cy],
