@@ -570,7 +570,7 @@ async function build(layer, opts) {
     const rows = order.map(o => o[1]), recs = order.map(o => layer.records[o[0]]);
     const [ccx, ccy] = centroid(g), acres = Math.round(polysArea(g) / 43560 * 100) / 100;
     outStacks.push({ polys: sceneRings(g, cx, cy, 0), acres, exact: st.exact, cause, cx: r1((ccx - cx) / SCENE_FT), cy: r1((ccy - cy) / SCENE_FT), rows, recs });
-    for (const r of rows) stackRows.push({ stack: n + 1, rows_in_stack: rows.length, likely_cause: CAUSES[cause].label, exact_match: st.exact ? 'yes' : 'no', shape_acres: acres, ...r });
+    for (const r of rows) stackRows.push({ stack: n + 1, rows_in_stack: rows.length, exact_match: st.exact ? 'yes' : 'no', shape_acres: acres, ...r });
   });
   progress('Drawing the ground layer…'); await yieldUI();
   const ground = geomsFt.filter(Boolean).map(g => sceneRings(g, cx, cy, GROUND_SIMPLIFY_FT));
@@ -598,7 +598,7 @@ async function build(layer, opts) {
 }
 
 function stacksCsv(stackRows) {
-  if (!stackRows.length) return 'stack,rows_in_stack,likely_cause,exact_match,shape_acres\n';
+  if (!stackRows.length) return 'stack,rows_in_stack,exact_match,shape_acres\n';
   const cols = []; for (const r of stackRows) for (const k of Object.keys(r)) if (!cols.includes(k)) cols.push(k);
   const cell = v => { if (v == null) return ''; const s = String(v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
   return [cols.join(','), ...stackRows.map(r => cols.map(c => cell(r[c])).join(','))].join('\n') + '\n';
